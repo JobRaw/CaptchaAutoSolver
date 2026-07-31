@@ -19,3 +19,6 @@ venv/
 # 大型二进制文件（使用 Git LFS 或手动管理）
 # models/common_q8.onnx
 # lib/onnxruntime/ort-wasm-simd-threaded.wasm
+
+# IDE 配置文件
+.idea/
