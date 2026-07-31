@@ -1,6 +1,11 @@
 # 验证码自动识别助手 (CaptchaAutoSolver)
 
 > 基于浏览器端极速 OCR 引擎的全自动网页图形验证码识别与填充工具。0延迟、0干预、100%保护隐私，无需任何外部服务，无缝为你省下每一次敲击键盘的时间。
+<p align="center">
+  <img src="assets/demo1.png" width="30%" alt="常规验证码" />
+  <img src="assets/demo2.png" width="30%" alt="算术题验证码" />
+  <img src="assets/demo3.png" width="30%" alt="大小写混合验证码" />
+</p>
 
 ## ✨ 核心特性
 
