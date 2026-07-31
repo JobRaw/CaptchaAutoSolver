@@ -13,7 +13,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 import ddddocr
 
 # 初始化 OCR 引擎，限制字符集为纯英文数字，大幅提升简单验证码精度
-ocr = ddddocr.DdddOcr(show_ad=False)
+ocr = ddddocr.DdddOcr(beta=True, show_ad=False)
 # 6 = 小写+大写+数字
 ocr.set_ranges(6)
 
