@@ -1,0 +1,17 @@
+node_modules/
+package.json
+package-lock.json
+*.log
+.DS_Store
+
+# 测试产物
+test_preprocess.png
+test_onnx.js
+test_onnx.py
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env

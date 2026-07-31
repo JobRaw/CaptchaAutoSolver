@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>验证码自动识别助手 - 高级配置</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">⚡ Captcha Solver Settings</div>
+      <p class="subtitle">针对特殊命名网站配置 CSS 选择器匹配规则</p>
+    </div>
+
+    <div class="form-card">
+      <div class="form-group">
+        <label for="customImgSelector">自定义验证码图片 CSS 选择器</label>
+        <input type="text" id="customImgSelector" placeholder="例如: #my-captcha-img 或 img.login-code">
+        <span class="help-text">默认为空时自动智能探测包含 captcha / code 等关键词的 img 标签</span>
+      </div>
+
+      <div class="form-group">
+        <label for="customInputSelector">自定义验证码输入框 CSS 选择器</label>
+        <input type="text" id="customInputSelector" placeholder="例如: #my-captcha-input 或 input[name='verify']">
+        <span class="help-text">默认为空时自动智能探测包含 code / verify 等关键词的 input 标签</span>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary" id="saveBtn">保存配置</button>
+        <span class="save-toast" id="toast">✅ 保存成功！已同步应用</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

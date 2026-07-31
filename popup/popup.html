@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>验证码识别助手</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="logo">
+        <div class="icon-glow">⚡</div>
+        <span class="title">Captcha Solver</span>
+      </div>
+      <span class="badge">Local OCR</span>
+    </div>
+
+    <div class="status-box">
+      <div class="status-indicator active" id="statusDot"></div>
+      <div class="status-info">
+        <span class="status-title" id="statusText">自动识别服务工作正常</span>
+        <span class="status-desc">运行模式: 本地 OCR 服务 (ddddocr)</span>
+      </div>
+    </div>
+
+    <div class="control-row">
+      <span>启用无感自动填入</span>
+      <label class="switch">
+        <input type="checkbox" id="toggleEnabled" checked>
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="footer">
+      <button class="btn btn-secondary" id="openOptions">⚙️ 自定义匹配规则</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
