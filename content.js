@@ -225,21 +225,24 @@
 
       console.log('[CaptchaSolver] 图片已提取，正在发送到内置 OCR 引擎...');
 
-      // 通过 chrome.runtime.sendMessage 发送给 background → offscreen document
+      // 发送至 Service Worker -> Offscreen 进行推理
       const data = await chrome.runtime.sendMessage({
         type: 'ocr',
         image: base64,
-        rangeType: 6
+        rangeType: 7
       });
 
       if (data && data.success && data.text) {
+        // ========== 新增数学公式解析层 ==========
+        const finalValue = parseMathCaptcha(data.text);
+        
         console.log(
-          `[CaptchaSolver] ✅ 识别成功: %c${data.text}`,
-          'color:#2563eb; font-weight:bold; font-size:14px;'
+          `[CaptchaSolver] ✅ 识别成功: 原始结果 [%c${data.text}%c] -> 填入 [%c${finalValue}%c]`,
+          'color:#2563eb; font-weight:bold;', '', 'color:#16a34a; font-weight:bold;', ''
         );
-        fillInput(inputEl, data.text, imgEl);
+        fillInput(inputEl, finalValue, imgEl);
         inputEl.dataset.solvedSrc = imgEl.src;
-        showNotice(inputEl, `✅ 已自动填入: ${data.text}`, 2500);
+        showNotice(inputEl, `✅ 已自动填入: ${finalValue}`, 2500);
       } else {
         throw new Error((data && data.error) || '识别返回空');
       }
@@ -252,6 +255,37 @@
   }
 
   // ==================== 工具函数 ====================
+
+  /**
+   * 尝试解析并计算数学公式验证码
+   * 如果是数学题（如 3+4=?），返回计算结果；如果是普通字符串，原样返回
+   */
+  function parseMathCaptcha(text) {
+    // 清理可能导致误判的空格
+    const cleanText = text.replace(/\s+/g, '');
+    
+    // 匹配：数字 (操作符) 数字 (可选的等号/问号/乱码)
+    const mathRegex = /^(\d+)([\+\-\*xX/÷])(\d+).*$/;
+    const match = cleanText.match(mathRegex);
+    
+    if (match) {
+      const num1 = parseInt(match[1], 10);
+      const operator = match[2].toLowerCase();
+      const num2 = parseInt(match[3], 10);
+      
+      switch (operator) {
+        case '+': return (num1 + num2).toString();
+        case '-': return (num1 - num2).toString();
+        case '*':
+        case 'x': return (num1 * num2).toString();
+        case '/':
+        case '÷': return num2 !== 0 ? (Math.floor(num1 / num2)).toString() : text;
+      }
+    }
+    
+    // 如果不是数学题，原样返回
+    return text;
+  }
 
   let sharedCanvas = null;
   /** 获取全局复用的 Canvas 以减少内存碎片 */

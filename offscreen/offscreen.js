@@ -210,6 +210,7 @@ function buildAllowedChars(rangeType) {
     case 4: chars = LOWER + DIGITS; break;
     case 5: chars = UPPER + DIGITS; break;
     case 6: chars = LOWER + UPPER + DIGITS; break;
+    case 7: chars = LOWER + UPPER + DIGITS + '+-*=/÷?'; break; // 支持数学算术题
     default: return null; // 不过滤，使用全字符集
   }
   return new Set(chars.split(''));
