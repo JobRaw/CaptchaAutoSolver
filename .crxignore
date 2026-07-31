@@ -1,0 +1,16 @@
+# 忽略本地测试与开发文件
+test_demo.html
+test_preprocess.png
+test_onnx.js
+test_onnx.py
+
+# 忽略环境配置与源码
+ocr_server.py
+package.json
+package-lock.json
+node_modules/
+
+# 忽略系统与 IDE 文件
+.DS_Store
+.idea/
+*.log

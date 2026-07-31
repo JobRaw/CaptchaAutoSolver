@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "验证码自动识别助手",
   "version": "1.0.0",
-  "description": "基于本地极速 OCR 引擎的全自动网页图形验证码识别与填充工具。0延迟、0干预、100%保护隐私，无缝为你省下每一次敲击键盘的时间。",
+  "description": "基于本地极速 OCR 引擎的全自动网页图形验证码识别工具。零干预、零延迟，100% 隐私保护。",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -10,10 +10,8 @@
   },
   "permissions": [
     "storage",
-    "activeTab"
-  ],
-  "host_permissions": [
-    "<all_urls>"
+    "offscreen",
+    "alarms"
   ],
   "action": {
     "default_popup": "popup/popup.html",
@@ -24,6 +22,9 @@
       "128": "icons/icon128.png"
     }
   },
+  "background": {
+    "service_worker": "background.js"
+  },
   "options_page": "options/options.html",
   "content_scripts": [
     {
@@ -32,5 +33,8 @@
       "run_at": "document_idle",
       "all_frames": true
     }
-  ]
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  }
 }

@@ -7,7 +7,6 @@
 
   // ==================== 常量配置 ====================
 
-  const OCR_SERVER_URL = 'http://127.0.0.1:19999/ocr';
   const SCAN_INTERVAL_MS = 1500;
   const MUTATION_DEBOUNCE_MS = 500;
   const SRC_CHANGE_DEBOUNCE_MS = 300;
@@ -77,15 +76,38 @@
 
   // ==================== DOM 扫描与监听 ====================
 
-  /** 启动定时扫描与 DOM 变动监听 */
+  /** 启动防抖的 DOM 变动监听与交互监听 */
   function startObserving() {
-    scanAndSolve();
-    setInterval(scanAndSolve, SCAN_INTERVAL_MS);
+    let scanTimer = null;
+    const triggerScan = () => {
+      if (scanTimer) clearTimeout(scanTimer);
+      scanTimer = setTimeout(scanAndSolve, MUTATION_DEBOUNCE_MS);
+    };
+
+    scanAndSolve(); // 初始扫描
 
     if (document.body) {
-      new MutationObserver(() => setTimeout(scanAndSolve, MUTATION_DEBOUNCE_MS))
-        .observe(document.body, { childList: true, subtree: true });
+      new MutationObserver((mutations) => {
+        // 过滤：有新增节点或属性 src 改变时才触发扫描
+        const shouldScan = mutations.some(m => m.addedNodes.length > 0 || m.attributeName === 'src');
+        if (shouldScan) triggerScan();
+      }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
     }
+
+    // 监听全局所有的图片加载事件（使用捕获阶段，因为 load 不冒泡）
+    // 解决单页应用中，图片刚插入 DOM 时没有尺寸导致 isCaptchaSize 漏判的问题
+    document.addEventListener('load', (e) => {
+      if (e.target && e.target.tagName === 'IMG') {
+        triggerScan();
+      }
+    }, true);
+
+    // 按需触发：用户聚焦到任何 input 时触发轻量级扫描
+    document.addEventListener('focusin', (e) => {
+      if (e.target && e.target.tagName === 'INPUT') {
+        triggerScan();
+      }
+    });
   }
 
   /** 扫描页面寻找验证码，找到后自动识别并填入 */
@@ -145,13 +167,20 @@
 
     // 兜底：遍历所有 img，按尺寸和上下文关键词判断
     for (const img of document.querySelectorAll('img')) {
-      if (!isVisible(img) || !isCaptchaValid(img) || !isCaptchaSize(img)) continue;
       const src = (img.src || '').toLowerCase();
+      const className = (img.className || '').toString().toLowerCase();
       const parentClass = (img.parentElement?.className || '').toString().toLowerCase();
-      if (src.includes('captcha') || src.includes('code') || src.includes('verify') ||
-          parentClass.includes('code') || parentClass.includes('captcha')) {
-        return img;
-      }
+      
+      const isMatch = src.includes('captcha') || src.includes('code') || src.includes('verify') ||
+                      className.includes('captcha') || className.includes('code') || className.includes('verify') ||
+                      parentClass.includes('code') || parentClass.includes('captcha');
+      
+      if (!isMatch) continue; // 第一道屏障：极低成本过滤 99% 的无关图片
+      
+      // 匹配后再执行昂贵的 DOM 布局计算 (isVisible 等)，避免页面卡顿
+      if (!isCaptchaValid(img) || !isCaptchaSize(img) || !isVisible(img)) continue;
+      
+      return img;
     }
     return null;
   }
@@ -170,17 +199,21 @@
 
     // 兜底：按 placeholder / name 关键词匹配
     for (const input of document.querySelectorAll("input[type='text'], input:not([type])")) {
-      if (!isVisible(input)) continue;
       const ph = (input.placeholder || '').toLowerCase();
       const name = (input.name || '').toLowerCase();
-      if (ph.includes('验证码') || ph.includes('code') || name.includes('code')) return input;
+      
+      const isMatch = ph.includes('验证码') || ph.includes('code') || name.includes('code');
+      if (!isMatch) continue; // 极低成本过滤
+      
+      if (!isVisible(input)) continue; // 昂贵的布局计算放最后
+      return input;
     }
     return null;
   }
 
   // ==================== OCR 识别 ====================
 
-  /** 提取图片并发送到本地 OCR 服务进行识别 */
+  /** 提取图片并通过浏览器内置 OCR 引擎进行识别 */
   async function solveTarget(imgEl, inputEl) {
     if (isProcessing) return;
     isProcessing = true;
@@ -188,20 +221,18 @@
 
     try {
       const base64 = await getImageBase64(imgEl);
-      if (!base64) throw new Error('无法提取图片');
+      if (!base64) throw new Error('图片跨域限制，无法读取验证码');
 
-      console.log('[CaptchaSolver] 图片已提取，正在发送到本地 OCR 服务...');
+      console.log('[CaptchaSolver] 图片已提取，正在发送到内置 OCR 引擎...');
 
-      const resp = await fetch(OCR_SERVER_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64 })
+      // 通过 chrome.runtime.sendMessage 发送给 background → offscreen document
+      const data = await chrome.runtime.sendMessage({
+        type: 'ocr',
+        image: base64,
+        rangeType: 6
       });
 
-      if (!resp.ok) throw new Error(`OCR 服务返回 ${resp.status}`);
-      const data = await resp.json();
-
-      if (data.success && data.text) {
+      if (data && data.success && data.text) {
         console.log(
           `[CaptchaSolver] ✅ 识别成功: %c${data.text}`,
           'color:#2563eb; font-weight:bold; font-size:14px;'
@@ -210,17 +241,11 @@
         inputEl.dataset.solvedSrc = imgEl.src;
         showNotice(inputEl, `✅ 已自动填入: ${data.text}`, 2500);
       } else {
-        throw new Error(data.error || '识别返回空');
+        throw new Error((data && data.error) || '识别返回空');
       }
     } catch (err) {
       console.error('[CaptchaSolver]', err);
-      const isNetworkError = err.message.includes('Failed to fetch') ||
-                             err.message.includes('NetworkError');
-      showNotice(
-        inputEl,
-        isNetworkError ? '⚠️ OCR 服务未启动，请运行 python3 ocr_server.py' : `⚠️ ${err.message}`,
-        isNetworkError ? 5000 : 3000
-      );
+      showNotice(inputEl, `⚠️ ${err.message}`, 3000);
     } finally {
       isProcessing = false;
     }
@@ -228,15 +253,22 @@
 
   // ==================== 工具函数 ====================
 
+  let sharedCanvas = null;
+  /** 获取全局复用的 Canvas 以减少内存碎片 */
+  function getSharedCanvas() {
+    if (!sharedCanvas) sharedCanvas = document.createElement('canvas');
+    return sharedCanvas;
+  }
+
   /** 提取图片的 Base64 编码，支持跨域回退 */
   function getImageBase64(imgEl) {
     return new Promise((resolve) => {
       const w = imgEl.naturalWidth || imgEl.width;
       const h = imgEl.naturalHeight || imgEl.height;
-      const canvas = document.createElement('canvas');
+      const canvas = getSharedCanvas();
       canvas.width = w;
       canvas.height = h;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
       try {
         ctx.drawImage(imgEl, 0, 0, w, h);
