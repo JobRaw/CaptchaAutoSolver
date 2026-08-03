@@ -71,6 +71,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true; // 异步响应
   }
+
+  if (message.type === 'slider') {
+    handleSliderRequest(message, sender)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true; // 异步响应
+  }
 });
 
 /**
@@ -94,6 +101,32 @@ async function handleOCRRequest(message, sender) {
     return response;
   } catch (err) {
     console.error('[Background] OCR 请求处理失败:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * 处理来自 Content Script 的滑动验证码缺口检测请求
+ * 转发给 Offscreen Document 执行图像分析
+ */
+async function handleSliderRequest(message, sender) {
+  try {
+    await ensureOffscreenDocument();
+
+    // 转发请求到 offscreen document
+    const response = await chrome.runtime.sendMessage({
+      type: 'slider-detect',
+      bgImage: message.bgImage,
+      pieceImage: message.pieceImage || null,
+      initialLeft: message.initialLeft || 0
+    });
+
+    // 每次处理完请求后，重置闲置计时器
+    resetIdleTimer();
+
+    return response;
+  } catch (err) {
+    console.error('[Background] 滑动验证码请求处理失败:', err);
     return { success: false, error: err.message };
   }
 }
