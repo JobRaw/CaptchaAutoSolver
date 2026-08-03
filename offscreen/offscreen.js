@@ -383,16 +383,16 @@ function templateMatchByEdge(bgImg, pieceImg, initialLeft = 0) {
   }
 
   let bestX = 0;
+  let bestY = 0;
   let bestScore = -Infinity;
   const maxY = bgImg.height - cropInfo.height;
   const avoidRadius = Math.max(25, Math.floor(cropInfo.width * 0.7));
 
-  // 2. 遍历背景寻找最高 ZNCC 分数位置，ZNCC 对亮度和外发光等绝对灰度差异免疫，极其精准
+  // 2. 第一阶段：粗粒度扫描 (Y轴步长 2)
   for (let x = minX; x <= maxX; x++) {
-    // 跳过滑块本身位置，避免自己匹配自己
     if (Math.abs(x - startX) < avoidRadius) continue;
 
-    for (let y = 0; y <= maxY; y += 2) { // Y轴以 2 步长采样，在保证极高精度的同时提升性能
+    for (let y = 0; y <= maxY; y += 2) {
       let sumB = 0;
       let sumB2 = 0;
       let cov = 0;
@@ -414,13 +414,46 @@ function templateMatchByEdge(bgImg, pieceImg, initialLeft = 0) {
         if (zncc > bestScore) {
           bestScore = zncc;
           bestX = x;
+          bestY = y;
+        }
+      }
+    }
+  }
+
+  // 3. 第二阶段：1px 领域的极致精细提纯 (在 bestX/bestY 周围 ±2 像素微调)
+  if (bestScore > -Infinity) {
+    const fineMinX = Math.max(minX, bestX - 2);
+    const fineMaxX = Math.min(maxX, bestX + 2);
+    const fineMinY = Math.max(0, bestY - 2);
+    const fineMaxY = Math.min(maxY, bestY + 2);
+
+    for (let x = fineMinX; x <= fineMaxX; x++) {
+      if (Math.abs(x - startX) < avoidRadius) continue;
+      for (let y = fineMinY; y <= fineMaxY; y++) {
+        let sumB = 0, sumB2 = 0, cov = 0, pIdx = 0;
+        for (let py = 0; py < cropInfo.height; py++) {
+          let bIdx = (y + py) * bgImg.width + x;
+          for (let px = 0; px < cropInfo.width; px++) {
+            const b = bgEdge[bIdx++];
+            sumB += b;
+            sumB2 += b * b;
+            cov += b * pNorm[pIdx++];
+          }
+        }
+        const varB = sumB2 - (sumB * sumB) / numPixels;
+        if (varB > 0) {
+          const zncc = cov / Math.sqrt(varB * varP);
+          if (zncc > bestScore) {
+            bestScore = zncc;
+            bestX = x;
+          }
         }
       }
     }
   }
   
   return {
-    success: bestScore > 0.20, // ZNCC 分数通常分布在 0.3 - 0.9，阈值放宽至 0.2 即可极度安全过滤
+    success: bestScore > 0.20,
     targetX: bestX,
     startX: startX,
     offsetX: bestX - startX,

@@ -629,7 +629,7 @@
       let initialPieceLeft = 0;
       if (pieceEl) {
         const pieceRect = pieceEl.getBoundingClientRect();
-        initialPieceLeft = Math.max(0, Math.round((pieceRect.left - bgRect.left) / scale));
+        initialPieceLeft = Math.max(0, (pieceRect.left - bgRect.left) / scale);
       }
 
       console.log('[CaptchaSolver] 滑动验证码图像已提取，正在分析缺口位置...');
