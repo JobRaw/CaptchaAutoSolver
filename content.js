@@ -894,18 +894,37 @@
     const now = Date.now();
 
     if (btnEl.dataset.rotationSrc !== currentSrc) {
+      const isFailedRetry = (btnEl.dataset.rotationSolved === 'true');
+      
       btnEl.dataset.rotationSrc = currentSrc;
       btnEl.dataset.rotationSrcTime = now.toString();
       btnEl.dataset.rotationSolved = 'false';
+
+      if (isFailedRetry) {
+        console.log(`%c[CaptchaSolver] ❌ 检测到验证码图片刷新，说明上一轮拖拽未通过服务器校验（验证失败）！即将重试...`, 'color: #dc2626; font-size: 13px; font-weight: bold;');
+        if (btnEl.dataset.lastMetrics) {
+          const m = JSON.parse(btnEl.dataset.lastMetrics);
+          m.outcome = 'FAIL';
+          console.log(`%c[DATA_COLLECTION] ${JSON.stringify(m)}`, 'background: #fee2e2; color: #991b1b; padding: 2px 4px; font-family: monospace;');
+        }
+      }
     }
 
     if (btnEl.dataset.rotationSolved === 'true') {
       return; // 已成功解决该图，等待图片变化
     }
 
-    // 防抖与加载等待：新图片出现后，强制等待 500ms，让 Loading 动画或过渡态结束
+    // 图片加载状态校验：如果是 IMG 标签且尚未加载完毕（或者正在缓慢加载），直接 return 等待，不要放行去识别
+    if (outerEl.tagName === 'IMG' && (!outerEl.complete || outerEl.naturalWidth === 0)) {
+      return;
+    }
+    if (innerEl.tagName === 'IMG' && (!innerEl.complete || innerEl.naturalWidth === 0)) {
+      return;
+    }
+
+    // 防抖与过渡动画等待：新图片出现后，强制等待至少 800ms，让 Loading 动画彻底消失
     const timeSinceNewSrc = now - parseInt(btnEl.dataset.rotationSrcTime || '0');
-    if (timeSinceNewSrc < 500) {
+    if (timeSinceNewSrc < 800) {
       return; 
     }
 
@@ -966,6 +985,17 @@
       let angleToUse = 0;
       let isFallback = false;
 
+      if (result && result.debugLogs && Array.isArray(result.debugLogs)) {
+        // 在前台 (网页 F12) 打印来自离屏后台的分析日志
+        result.debugLogs.forEach(log => {
+          console.log(`%c${log}`, 'color: #9333ea; font-style: italic;');
+        });
+      }
+
+      if (result && result.metrics) {
+        btnEl.dataset.lastMetrics = JSON.stringify(result.metrics);
+      }
+
       if (result && result.success && typeof result.bestAngle === 'number') {
         angleToUse = result.bestAngle;
         console.log(
@@ -1001,6 +1031,20 @@
       btnEl.dataset.rotationSolved = 'true';
       showNotice(btnEl, `✅ 旋转验证码已完成 (${angleToUse}°)`, 2500);
       showTransientGlow(btnEl, '#10b981', 'rgba(16, 185, 129, 0.85)');
+
+      // 埋个定时器检测是否真正成功
+      setTimeout(() => {
+        // 如果 2.5 秒后元素已经消失（或不可见），或者没消失但依然保持 solved 状态（说明没有被强行刷新）
+        if (!document.body.contains(btnEl) || !isVisible(btnEl) || btnEl.dataset.rotationSolved === 'true') {
+           console.log(`%c[CaptchaSolver] 🎉 经过 2.5 秒观察，未检测到验证码图片刷新。太棒了，上一轮验证大概率已成功通过服务器校验！`, 'color: #16a34a; font-size: 13px; font-weight: bold;');
+           if (btnEl.dataset.lastMetrics) {
+             const m = JSON.parse(btnEl.dataset.lastMetrics);
+             m.outcome = 'SUCCESS';
+             console.log(`%c[DATA_COLLECTION] ${JSON.stringify(m)}`, 'background: #dcfce7; color: #166534; padding: 2px 4px; font-family: monospace;');
+           }
+        }
+      }, 2500);
+
     } catch (err) {
       console.error('[CaptchaSolver] 旋转验证码处理失败:', err);
       showNotice(btnEl, `⚠️ ${err.message}`, 3000);

@@ -579,6 +579,74 @@ async function detectSliderGap(bgBase64, pieceBase64, initialLeft = 0) {
 
 // ==================== 旋转验证码带状极坐标匹配 ====================
 
+/**
+ * 提取指定中心的极坐标环形带（将圆环区域展开成矩形）- V1
+ */
+function extractPolarBand(imageData, cx, cy, radius, bandWidth, sampleCount) {
+  const { data, width, height } = imageData;
+  const numRadii = bandWidth * 2 + 1;
+  const polar = new Float32Array(sampleCount * numRadii);
+
+  for (let i = 0; i < sampleCount; i++) {
+    const angle = (2 * Math.PI * i) / sampleCount;
+    const cosA = Math.cos(angle);
+    const sinA = Math.sin(angle);
+
+    for (let dr = -bandWidth; dr <= bandWidth; dr++) {
+      const r = radius + dr;
+      const px = Math.round(cx + r * cosA);
+      const py = Math.round(cy + r * sinA);
+      
+      const pIdx = i * numRadii + (dr + bandWidth);
+      if (px >= 0 && px < width && py >= 0 && py < height) {
+        const idx = (py * width + px) * 4;
+        const alpha = data[idx + 3] / 255.0; // 提取 Alpha 通道
+        polar[pIdx] = (0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]) * alpha;
+      } else {
+        polar[pIdx] = 0;
+      }
+    }
+  }
+  return polar;
+}
+
+/**
+ * 计算两个二维极坐标带之间的 2D ZNCC 相关度 - V1
+ */
+function polarBandZNCC(outerBand, innerBand, numAngles, numRadii, shiftAngles) {
+  let sumO = 0, sumI = 0;
+  const N = numAngles * numRadii;
+
+  // 第一遍：计算均值
+  for (let a = 0; a < numAngles; a++) {
+    const outerRowOffset = a * numRadii;
+    const innerRowOffset = (((a + shiftAngles) % numAngles + numAngles) % numAngles) * numRadii;
+    for (let r = 0; r < numRadii; r++) {
+      sumO += outerBand[outerRowOffset + r];
+      sumI += innerBand[innerRowOffset + r];
+    }
+  }
+  const meanO = sumO / N;
+  const meanI = sumI / N;
+
+  // 第二遍：计算方差和协方差
+  let cov = 0, varO = 0, varI = 0;
+  for (let a = 0; a < numAngles; a++) {
+    const outerRowOffset = a * numRadii;
+    const innerRowOffset = (((a + shiftAngles) % numAngles + numAngles) % numAngles) * numRadii;
+    for (let r = 0; r < numRadii; r++) {
+      const o = outerBand[outerRowOffset + r] - meanO;
+      const ii = innerBand[innerRowOffset + r] - meanI;
+      cov += o * ii;
+      varO += o * o;
+      varI += ii * ii;
+    }
+  }
+
+  const denom = Math.sqrt(varO * varI);
+  return denom > 0 ? cov / denom : 0;
+}
+
 function extractPolarRows(imageData, cx, cy, radius, bandWidth, sampleCount) {
   const { data, width, height } = imageData;
   const numRadii = bandWidth * 2 + 1;
@@ -685,61 +753,165 @@ async function detectRotationAngle(outerBase64, innerBase64, cx, cy, radius, inn
     if (!cy || cy <= 0) cy = outerImg.height / 2;
 
     const sampleCount = 360;
-    const bandWidth = 18; // 进一步扩大带宽至 18，极强抗半径误差 (厚度37px)
 
-    const outerRows = extractPolarRows(outerData, cx, cy, radius, bandWidth, sampleCount);
-    const innerRows = extractPolarRows(innerData, innerCx, innerCy, innerRadius, bandWidth, sampleCount);
+    // === 运行 V1 (2D 极坐标带状匹配) ===
+    let v1BestAngle = 0;
+    let v1BestScore = -Infinity;
+    try {
+      const v1BandWidth = 8;
+      const v1NumRadii = v1BandWidth * 2 + 1;
+      const outerBand = extractPolarBand(outerData, cx, cy, radius, v1BandWidth, sampleCount);
+      const innerBand = extractPolarBand(innerData, innerCx, innerCy, innerRadius, v1BandWidth, sampleCount);
 
-    // 过滤掉透明行或纯色无纹理行 (降低 variance 阈值到 5，防止平滑的天空背景被误杀)
-    const validOuter = outerRows.filter(r => r.validCount > sampleCount * 0.8 && r.variance > 5);
-    const validInner = innerRows.filter(r => r.validCount > sampleCount * 0.8 && r.variance > 5);
-
-    if (validOuter.length === 0 || validInner.length === 0) {
-      throw new Error('图像缺乏有效纹理特征，可能全部为纯色或透明');
-    }
-
-    let bestAngle = 0;
-    let bestScore = -Infinity;
-    let bestPair = null;
-
-    // 粗搜 (放开所有 dr 的组合，彻底解决缩放比例和半径计算偏差的问题)
-    for (const rowO of validOuter) {
-      for (const rowI of validInner) {
-        for (let deg = 0; deg < 360; deg += 3) {
-          const score = zncc1D(rowO.data, rowI.data, sampleCount, deg);
-          if (score > bestScore) {
-            bestScore = score;
-            bestAngle = deg;
-            bestPair = { o: rowO.dr, i: rowI.dr, rO: rowO.r, rI: rowI.r };
+      for (let deg = 0; deg < 360; deg += 3) {
+        const score = polarBandZNCC(outerBand, innerBand, sampleCount, v1NumRadii, deg);
+        if (score > v1BestScore) {
+          v1BestScore = score;
+          v1BestAngle = deg;
+        }
+      }
+      if (v1BestScore > -Infinity) {
+        const fineStart = v1BestAngle - 5;
+        const fineEnd = v1BestAngle + 5;
+        for (let deg = fineStart; deg <= fineEnd; deg++) {
+          const normalizedDeg = ((deg % 360) + 360) % 360;
+          const score = polarBandZNCC(outerBand, innerBand, sampleCount, v1NumRadii, normalizedDeg);
+          if (score > v1BestScore) {
+            v1BestScore = score;
+            v1BestAngle = normalizedDeg;
           }
         }
       }
+    } catch (err) {
+      console.warn("[OCR Offscreen] V1 算法运行异常:", err);
     }
 
-    // 细搜
-    if (bestPair) {
-      const fineStart = bestAngle - 5;
-      const fineEnd = bestAngle + 5;
-      const rowO = validOuter.find(r => r.dr === bestPair.o);
-      const rowI = validInner.find(r => r.dr === bestPair.i);
-      
-      for (let deg = fineStart; deg <= fineEnd; deg++) {
-        const normalizedDeg = ((deg % 360) + 360) % 360;
-        const score = zncc1D(rowO.data, rowI.data, sampleCount, normalizedDeg);
-        if (score > bestScore) {
-          bestScore = score;
-          bestAngle = normalizedDeg;
+    // === 运行 V2 (1D 跨边界 ZNCC 匹配) ===
+    let v2BestAngle = 0;
+    let v2BestScore = -Infinity;
+    let v2BestPair = null;
+    let v2ErrorMsg = null;
+    try {
+      const v2BandWidth = 18;
+      const outerRows = extractPolarRows(outerData, cx, cy, radius, v2BandWidth, sampleCount);
+      const innerRows = extractPolarRows(innerData, innerCx, innerCy, innerRadius, v2BandWidth, sampleCount);
+
+      const validOuter = outerRows.filter(r => r.validCount > sampleCount * 0.8 && r.variance > 5);
+      const validInner = innerRows.filter(r => r.validCount > sampleCount * 0.8 && r.variance > 5);
+
+      if (validOuter.length === 0 || validInner.length === 0) {
+        v2ErrorMsg = 'V2: 图像缺乏有效纹理特征，可能全部为纯色或透明';
+      } else {
+        for (const rowO of validOuter) {
+          for (const rowI of validInner) {
+            for (let deg = 0; deg < 360; deg += 3) {
+              const score = zncc1D(rowO.data, rowI.data, sampleCount, deg);
+              if (score > v2BestScore) {
+                v2BestScore = score;
+                v2BestAngle = deg;
+                v2BestPair = { o: rowO.dr, i: rowI.dr, rO: rowO.r, rI: rowI.r };
+              }
+            }
+          }
+        }
+
+        if (v2BestPair) {
+          const fineStart = v2BestAngle - 5;
+          const fineEnd = v2BestAngle + 5;
+          const rowO = validOuter.find(r => r.dr === v2BestPair.o);
+          const rowI = validInner.find(r => r.dr === v2BestPair.i);
+          
+          for (let deg = fineStart; deg <= fineEnd; deg++) {
+            const normalizedDeg = ((deg % 360) + 360) % 360;
+            const score = zncc1D(rowO.data, rowI.data, sampleCount, normalizedDeg);
+            if (score > v2BestScore) {
+              v2BestScore = score;
+              v2BestAngle = normalizedDeg;
+            }
+          }
         }
       }
+    } catch (err) {
+      console.warn("[OCR Offscreen] V2 算法运行异常:", err);
+      v2ErrorMsg = err.message;
     }
 
-    console.log(`[OCR Offscreen] 跨边界 1D ZNCC: 最佳角度 ${bestAngle}°, 置信度: ${bestScore.toFixed(4)}, 匹配的偏移层 dr: [外 ${bestPair?.o}, 内 ${bestPair?.i}]`);
+    // === 混合决策算法 (V1定大局，V2抠细节) ===
+    const v1Str = (v1BestScore === -Infinity ? 0 : v1BestScore).toFixed(4);
+    const v2Str = (v2BestScore === -Infinity ? 0 : v2BestScore).toFixed(4);
+    
+    const debugLogs = [];
+    debugLogs.push(`[OCR Offscreen] 🔍 旋转检测得分对比：`);
+    debugLogs.push(`  ➔ V1 (2D 带状匹配): 角度 ${v1BestAngle}°, 得分 ${v1Str}`);
+    debugLogs.push(`  ➔ V2 (1D 边界匹配): 角度 ${v2BestAngle}°, 得分 ${v2Str} (外层 ${v2BestPair ? v2BestPair.o : 'N/A'}, 内层 ${v2BestPair ? v2BestPair.i : 'N/A'})`);
+    
+    debugLogs.forEach(l => console.log(l));
+
+    let finalAngle = 0;
+    let finalConfidence = 0;
+    let success = false;
+    let errorMsg = null;
+
+    const v1Threshold = 0.055; 
+    const v2Threshold = 0.6; // V2 的 1D 边界匹配特征极强，及格线大幅提高到 0.6 以防噪音假阳性
+
+    const angleDiff = Math.min(Math.abs(v1BestAngle - v2BestAngle), 360 - Math.abs(v1BestAngle - v2BestAngle));
+
+    if (v1BestScore > v1Threshold) {
+      // V1 全局匹配成功，锁定了正确的大致方位
+      if (angleDiff <= 30 && v2BestScore > v2Threshold) {
+        // V1 和 V2 方向基本一致（误差在 30 度以内），且 V2 得分及格
+        // 此时 V2 的单像素边界匹配（1D）精度远高于 V1 的带状模糊匹配（2D）
+        finalAngle = v2BestAngle;
+        finalConfidence = v2BestScore;
+        success = true;
+        const log1 = `[OCR Offscreen] ✅ 最终选择: V2 (角度 ${finalAngle}°) [高精度微调]`;
+        const log2 = `[OCR Offscreen] 💡 选择原因: V1(${v1BestAngle}°)与V2(${v2BestAngle}°)大方向一致(偏差${angleDiff}°)。采用 V1 验证大局无误，采用 V2 提供像素级极高精度。`;
+        debugLogs.push(log1, log2);
+        console.log(log1); console.log(log2);
+      } else {
+        // V2 偏离太远（可能是被直线/重复纹理干扰产生的假阳性）
+        finalAngle = v1BestAngle;
+        finalConfidence = v1BestScore;
+        success = true;
+        const log1 = `[OCR Offscreen] ✅ 最终选择: V1 (角度 ${finalAngle}°) [全局求稳]`;
+        const log2 = `[OCR Offscreen] 💡 选择原因: V2 偏离 V1 太远(偏差${angleDiff}°)或分数过低(${v2Str})，判定 V2 为局部假阳性干扰。退回采用抗干扰最强的 V1。`;
+        debugLogs.push(log1, log2);
+        console.log(log1); console.log(log2);
+      }
+    } else if (v2BestScore > v2Threshold) {
+      // V1 彻底失败，V2 临危受命
+      finalAngle = v2BestAngle;
+      finalConfidence = v2BestScore;
+      success = true;
+      const log1 = `[OCR Offscreen] ✅ 最终选择: V2 (角度 ${finalAngle}°) [替补破局]`;
+      const log2 = `[OCR Offscreen] 💡 选择原因: V1全局失联(${v1Str})，但V2抓到了强烈的局部边界特征(${v2Str} > ${v2Threshold})，启用 V2 替补。`;
+      debugLogs.push(log1, log2);
+      console.log(log1); console.log(log2);
+    } else {
+      success = false;
+      finalAngle = 0;
+      finalConfidence = Math.max(0, v1BestScore, v2BestScore);
+      errorMsg = `算法均未达到及格线: [V1:${v1Str}, V2:${v2Str}]`;
+      const log1 = `[OCR Offscreen] ❌ 最终选择: 无 (检测失败)`;
+      debugLogs.push(log1);
+      console.log(log1);
+    }
 
     return {
-      success: bestScore > 0.08,
-      bestAngle: bestAngle,
-      confidence: Math.max(0, bestScore),
-      error: bestScore <= 0.08 ? `置信度过低 (${bestScore.toFixed(3)} <= 0.08)` : null
+      success: success,
+      bestAngle: finalAngle,
+      confidence: finalConfidence,
+      error: errorMsg,
+      debugLogs: debugLogs,
+      metrics: {
+        v1Angle: v1BestAngle,
+        v1Score: v1BestScore,
+        v2Angle: v2BestAngle,
+        v2Score: v2BestScore,
+        chosenAlgo: (v1BestScore > v1Threshold) ? (angleDiff <= 30 && v2BestScore > v2Threshold ? 'V2' : 'V1') : ((v2BestScore > v2Threshold) ? 'V2' : 'NONE'),
+        geo: { cx, cy, radius, innerRadius }
+      }
     };
   } catch (err) {
     console.error("[OCR Offscreen] ❌ 旋转角度检测异常:", err);
