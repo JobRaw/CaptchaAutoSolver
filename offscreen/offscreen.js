@@ -568,6 +568,176 @@ async function detectSliderGap(bgBase64, pieceBase64, initialLeft = 0) {
   }
 }
 
+// ==================== 旋转验证码带状极坐标匹配 ====================
+
+/**
+ * 提取指定中心的极坐标环形带（将圆环区域展开成矩形）
+ * @param {ImageData} imageData
+ * @param {number} cx 圆心
+ * @param {number} cy 圆心
+ * @param {number} radius 中心半径
+ * @param {number} bandWidth 向内外延伸的像素宽度（总厚度 2 * bandWidth）
+ * @param {number} sampleCount 角度采样数
+ * @returns {Float32Array} 一维数组存储的 2D 矩阵 (行数: sampleCount, 列数: 2*bandWidth+1)
+ */
+function extractPolarBand(imageData, cx, cy, radius, bandWidth, sampleCount) {
+  const { data, width, height } = imageData;
+  const numRadii = bandWidth * 2 + 1;
+  const polar = new Float32Array(sampleCount * numRadii);
+
+  for (let i = 0; i < sampleCount; i++) {
+    const angle = (2 * Math.PI * i) / sampleCount;
+    const cosA = Math.cos(angle);
+    const sinA = Math.sin(angle);
+
+    for (let dr = -bandWidth; dr <= bandWidth; dr++) {
+      const r = radius + dr;
+      const px = Math.round(cx + r * cosA);
+      const py = Math.round(cy + r * sinA);
+      
+      const pIdx = i * numRadii + (dr + bandWidth);
+      if (px >= 0 && px < width && py >= 0 && py < height) {
+        const idx = (py * width + px) * 4;
+        const alpha = data[idx + 3] / 255.0; // 提取 Alpha 通道
+        polar[pIdx] = (0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]) * alpha;
+      } else {
+        polar[pIdx] = 0;
+      }
+    }
+  }
+  return polar;
+}
+
+/**
+ * 计算两个二维极坐标带之间的 2D ZNCC 相关度
+ * @param {Float32Array} outerBand 外部带
+ * @param {Float32Array} innerBand 内部带
+ * @param {number} numAngles 角度数量
+ * @param {number} numRadii 半径数量
+ * @param {number} shiftAngles 内部带循环偏移的角度数
+ * @returns {number} ZNCC 值
+ */
+function polarBandZNCC(outerBand, innerBand, numAngles, numRadii, shiftAngles) {
+  let sumO = 0, sumI = 0;
+  const N = numAngles * numRadii;
+
+  // 第一遍：计算均值
+  for (let a = 0; a < numAngles; a++) {
+    const outerRowOffset = a * numRadii;
+    const innerRowOffset = (((a + shiftAngles) % numAngles + numAngles) % numAngles) * numRadii;
+    for (let r = 0; r < numRadii; r++) {
+      sumO += outerBand[outerRowOffset + r];
+      sumI += innerBand[innerRowOffset + r];
+    }
+  }
+  const meanO = sumO / N;
+  const meanI = sumI / N;
+
+  // 第二遍：计算方差和协方差
+  let cov = 0, varO = 0, varI = 0;
+  for (let a = 0; a < numAngles; a++) {
+    const outerRowOffset = a * numRadii;
+    const innerRowOffset = (((a + shiftAngles) % numAngles + numAngles) % numAngles) * numRadii;
+    for (let r = 0; r < numRadii; r++) {
+      const o = outerBand[outerRowOffset + r] - meanO;
+      const ii = innerBand[innerRowOffset + r] - meanI;
+      cov += o * ii;
+      varO += o * o;
+      varI += ii * ii;
+    }
+  }
+
+  const denom = Math.sqrt(varO * varI);
+  return denom > 0 ? cov / denom : 0;
+}
+
+/**
+ * 检测旋转验证码的正确旋转角度（极坐标带状模板匹配法）
+ * @param {string} outerBase64
+ * @param {string} innerBase64
+ * @param {number} cx
+ * @param {number} cy
+ * @param {number} radius
+ * @param {number} innerRadius
+ * @returns {Promise<{success: boolean, bestAngle: number, confidence: number}>}
+ */
+async function detectRotationAngle(outerBase64, innerBase64, cx, cy, radius, innerRadius) {
+  try {
+    const canvas = document.getElementById("preprocess-canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+    // 加载外部背景图
+    const outerImg = await loadImage(outerBase64);
+    canvas.width = outerImg.width;
+    canvas.height = outerImg.height;
+    ctx.drawImage(outerImg, 0, 0);
+    const outerData = ctx.getImageData(0, 0, outerImg.width, outerImg.height);
+
+    // 加载圆形旋转内容图
+    const innerImg = await loadImage(innerBase64);
+    canvas.width = innerImg.width;
+    canvas.height = innerImg.height;
+    ctx.drawImage(innerImg, 0, 0);
+    const innerData = ctx.getImageData(0, 0, innerImg.width, innerImg.height);
+
+    const innerCx = innerImg.width / 2;
+    const innerCy = innerImg.height / 2;
+
+    if (!radius || radius <= 0) radius = Math.min(innerImg.width, innerImg.height) / 2 - 2;
+    if (!innerRadius || innerRadius <= 0) innerRadius = Math.min(innerImg.width, innerImg.height) / 2 - 2;
+    if (!cx || cx <= 0) cx = outerImg.width / 2;
+    if (!cy || cy <= 0) cy = outerImg.height / 2;
+
+    // 采样点与带宽
+    const sampleCount = 360; // 固定采样 360 度，方便计算
+    const bandWidth = 8;     // ±8像素，总带宽 17 像素，极强抗偏移干扰
+    const numRadii = bandWidth * 2 + 1;
+
+    // 将内外图像环形区域拉直成 2D 矩形
+    const outerBand = extractPolarBand(outerData, cx, cy, radius, bandWidth, sampleCount);
+    const innerBand = extractPolarBand(innerData, innerCx, innerCy, innerRadius, bandWidth, sampleCount);
+
+    console.log(`[OCR Offscreen] 2D 旋转匹配: 中心(${cx}, ${cy}), 外部R=${radius}, 内部R=${innerRadius}, 带宽=${bandWidth}`);
+
+    let bestAngle = 0;
+    let bestScore = -Infinity;
+
+    // 全局 360 度 2D 模板平移匹配
+    for (let deg = 0; deg < 360; deg += 3) { // 粗搜 3度步长
+      const score = polarBandZNCC(outerBand, innerBand, sampleCount, numRadii, deg);
+      if (score > bestScore) {
+        bestScore = score;
+        bestAngle = deg;
+      }
+    }
+
+    console.log(`[OCR Offscreen] 粗搜索最优角度: ${bestAngle}°, ZNCC: ${bestScore.toFixed(4)}`);
+
+    // 细搜 ±5度
+    const fineStart = bestAngle - 5;
+    const fineEnd = bestAngle + 5;
+    for (let deg = fineStart; deg <= fineEnd; deg++) {
+      const normalizedDeg = ((deg % 360) + 360) % 360;
+      const score = polarBandZNCC(outerBand, innerBand, sampleCount, numRadii, normalizedDeg);
+      if (score > bestScore) {
+        bestScore = score;
+        bestAngle = normalizedDeg;
+      }
+    }
+
+    console.log(`[OCR Offscreen] ✅ 精搜索最终角度: ${bestAngle}°, ZNCC: ${bestScore.toFixed(4)}`);
+
+    return {
+      success: bestScore > 0.05,
+      bestAngle: bestAngle,
+      confidence: Math.max(0, bestScore)
+    };
+  } catch (err) {
+    console.error("[OCR Offscreen] ❌ 旋转角度检测异常:", err);
+    return { success: false, bestAngle: 0, confidence: 0, error: err.message };
+  }
+}
+
 // ==================== 消息监听 ====================
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -583,6 +753,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
+  if (message.type === 'rotation-detect') {
+    detectRotationAngle(message.outerImage, message.innerImage, message.cx || 0, message.cy || 0, message.radius || 0, message.innerRadius || 0)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
 });
 
-console.log('[OCR Offscreen] 离屏文档已加载，等待 OCR/缺口检测 请求...');
+console.log('[OCR Offscreen] 离屏文档已加载，等待 OCR/缺口检测/旋转检测 请求...');

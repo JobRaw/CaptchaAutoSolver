@@ -78,6 +78,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true; // 异步响应
   }
+
+  if (message.type === 'rotation') {
+    handleRotationRequest(message, sender)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true; // 异步响应
+  }
+
+  if (message.type === 'fetch-image') {
+    handleFetchImageRequest(message.url)
+      .then(sendResponse)
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
 });
 
 /**
@@ -127,6 +141,53 @@ async function handleSliderRequest(message, sender) {
     return response;
   } catch (err) {
     console.error('[Background] 滑动验证码请求处理失败:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * 处理来自 Content Script 的旋转验证码角度检测请求
+ * 转发给 Offscreen Document 执行图像分析
+ */
+async function handleRotationRequest(message, sender) {
+  try {
+    await ensureOffscreenDocument();
+
+    // 转发请求到 offscreen document
+    const response = await chrome.runtime.sendMessage({
+      type: 'rotation-detect',
+      outerImage: message.outerImage,
+      innerImage: message.innerImage,
+      cx: message.cx || 0,
+      cy: message.cy || 0,
+      radius: message.radius || 0,
+      innerRadius: message.innerRadius || 0
+    });
+
+    // 每次处理完请求后，重置闲置计时器
+    resetIdleTimer();
+
+    return response;
+  } catch (err) {
+    console.error('[Background] 旋转验证码请求处理失败:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * 绕过 CORS 限制，拉取跨域图片并转为 Base64
+ */
+async function handleFetchImageRequest(url) {
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve({ success: true, base64: reader.result });
+      reader.onerror = () => reject(new Error('图片转换 Base64 失败'));
+      reader.readAsDataURL(blob);
+    });
+  } catch (err) {
     return { success: false, error: err.message };
   }
 }
