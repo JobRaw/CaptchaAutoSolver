@@ -14,6 +14,7 @@
     </div>
 
     <div class="form-card">
+      <h3 class="section-title">📷 普通图形验证码选择器</h3>
       <div class="form-group">
         <label for="customImgSelector">自定义验证码图片 CSS 选择器</label>
         <input type="text" id="customImgSelector" placeholder="例如: #my-captcha-img 或 img.login-code">
@@ -26,6 +27,7 @@
         <span class="help-text">默认为空时自动智能探测包含 code / verify 等关键词的 input 标签</span>
       </div>
 
+      <h3 class="section-title">🧩 滑动拼图验证码选择器</h3>
       <div class="form-group">
         <label for="customSliderBgSelector">自定义滑动验证码背景图 CSS 选择器</label>
         <input type="text" id="customSliderBgSelector" placeholder="例如: .my-slider-bg img 或 canvas.captcha-bg">
@@ -38,8 +40,28 @@
         <span class="help-text">默认为空时自动探测常见滑动验证码厂商的拖拽滑块元素</span>
       </div>
 
+      <h3 class="section-title">🔄 旋转验证码选择器</h3>
+      <div class="form-group">
+        <label for="customRotationOuterSelector">自定义旋转验证码外层背景图 CSS 选择器</label>
+        <input type="text" id="customRotationOuterSelector" placeholder="例如: .my-rotate-outer img 或 div.rotate-bg">
+        <span class="help-text">默认为空时自动智能探测包含 rotate / rotation 等关键词的背景图</span>
+      </div>
+
+      <div class="form-group">
+        <label for="customRotationInnerSelector">自定义旋转验证码内层圆环图 CSS 选择器</label>
+        <input type="text" id="customRotationInnerSelector" placeholder="例如: .my-rotate-inner img 或 canvas.circle">
+        <span class="help-text">默认为空时自动智能探测包含 circle / rotate 等关键词的内层图</span>
+      </div>
+
+      <div class="form-group">
+        <label for="customRotationBtnSelector">自定义旋转验证码拖拽按钮 CSS 选择器</label>
+        <input type="text" id="customRotationBtnSelector" placeholder="例如: .my-rotate-btn 或 div.rotate-handle">
+        <span class="help-text">默认为空时自动智能探测包含 rotate / drag 等关键词的拖拽滑块元素</span>
+      </div>
+
       <div class="actions">
         <button class="btn btn-primary" id="saveBtn">保存配置</button>
+        <button class="btn btn-secondary" id="resetBtn">恢复默认</button>
         <span class="save-toast" id="toast">✅ 保存成功！已同步应用</span>
       </div>
     </div>

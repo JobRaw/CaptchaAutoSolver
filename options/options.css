@@ -5,6 +5,8 @@
   --text-sub: #94a3b8;
   --primary: #6366f1;
   --primary-hover: #4f46e5;
+  --secondary: #475569;
+  --secondary-hover: #334155;
   --border: rgba(255, 255, 255, 0.1);
 }
 
@@ -27,11 +29,11 @@ body {
 
 .container {
   width: 100%;
-  max-width: 520px;
+  max-width: 560px;
 }
 
 .header {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
   text-align: center;
 }
 
@@ -56,16 +58,29 @@ body {
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
 }
 
+.section-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #a5b4fc;
+  margin: 16px 0 12px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.section-title:first-child {
+  margin-top: 0;
+}
+
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   display: flex;
   flex-direction: column;
 }
 
 label {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 input {
@@ -87,21 +102,21 @@ input:focus {
 .help-text {
   font-size: 11px;
   color: var(--text-sub);
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .actions {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-top: 10px;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
 
-.btn-primary {
-  background: var(--primary);
-  color: white;
+.btn {
   border: none;
-  padding: 10px 20px;
+  padding: 10px 18px;
   border-radius: 10px;
   font-weight: 600;
   font-size: 13px;
@@ -109,8 +124,22 @@ input:focus {
   transition: all 0.2s;
 }
 
+.btn-primary {
+  background: var(--primary);
+  color: white;
+}
+
 .btn-primary:hover {
   background: var(--primary-hover);
+}
+
+.btn-secondary {
+  background: var(--secondary);
+  color: #e2e8f0;
+}
+
+.btn-secondary:hover {
+  background: var(--secondary-hover);
 }
 
 .save-toast {
@@ -118,6 +147,7 @@ input:focus {
   color: #34d399;
   opacity: 0;
   transition: opacity 0.3s ease;
+  margin-left: auto;
 }
 
 .save-toast.show {

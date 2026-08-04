@@ -4,21 +4,21 @@ package-lock.json
 *.log
 .DS_Store
 
-# 测试产物
+# 调试与数据产物
+dataset/
+parse_dom.js
+parse_dom2.js
+tools/
 test_preprocess.png
 test_onnx.js
 test_onnx.py
 
-# Python
+# Python 临时文件
 __pycache__/
 *.py[cod]
 *$py.class
 venv/
 .env
-
-# 大型二进制文件（使用 Git LFS 或手动管理）
-# models/common_q8.onnx
-# lib/onnxruntime/ort-wasm-simd-threaded.wasm
 
 # IDE 配置文件
 .idea/

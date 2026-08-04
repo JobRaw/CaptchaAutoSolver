@@ -241,30 +241,25 @@
       }
     }, true);
 
-    // 针对异步 HTTP 请求加载的验证码：在点击“获取验证码”等按钮时启动高频轮询探测（持续 3 秒）
-    document.addEventListener('click', (e) => {
-      console.log('[CaptchaSolver] 🖱️ 检测到页面点击事件，启动 3 秒高频轮询探测...');
+    let activePollTimer = null;
+    const triggerHighFrequencyScan = () => {
+      if (activePollTimer) clearInterval(activePollTimer);
       let count = 0;
-      const pollTimer = setInterval(() => {
+      activePollTimer = setInterval(() => {
         scanAndSolveRotation();
         scanAndSolveSlider();
         scanAndSolve();
         count++;
-        if (count >= 15) clearInterval(pollTimer); // 轮询 3 秒 (15 * 200ms)
+        if (count >= 15) {
+          clearInterval(activePollTimer);
+          activePollTimer = null;
+        }
       }, 200);
-    }, true);
+    };
 
-    document.addEventListener('touchstart', (e) => {
-      console.log('[CaptchaSolver] 📱 检测到页面 TouchStart 事件，启动 3 秒高频轮询探测...');
-      let count = 0;
-      const pollTimer = setInterval(() => {
-        scanAndSolveRotation();
-        scanAndSolveSlider();
-        scanAndSolve();
-        count++;
-        if (count >= 15) clearInterval(pollTimer);
-      }, 200);
-    }, true);
+    // 针对异步 HTTP 请求加载的验证码：在点击“获取验证码”等按钮时启动高频轮询探测（持续 3 秒，防抖单例）
+    document.addEventListener('click', triggerHighFrequencyScan, true);
+    document.addEventListener('touchstart', triggerHighFrequencyScan, true);
 
     // 按需触发：用户聚焦或离开 input 时触发轻量级扫描
     document.addEventListener('focusin', (e) => {
@@ -458,19 +453,12 @@
     return text;
   }
 
-  let sharedCanvas = null;
-  /** 获取全局复用的 Canvas 以减少内存碎片 */
-  function getSharedCanvas() {
-    if (!sharedCanvas) sharedCanvas = document.createElement('canvas');
-    return sharedCanvas;
-  }
-
   /** 提取图片的 Base64 编码，支持跨域回退 */
   function getImageBase64(imgEl) {
     return new Promise((resolve) => {
       const w = imgEl.naturalWidth || imgEl.width;
       const h = imgEl.naturalHeight || imgEl.height;
-      const canvas = getSharedCanvas();
+      const canvas = document.createElement('canvas');
       canvas.width = w;
       canvas.height = h;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -1161,7 +1149,7 @@
       const img = new Image();
       img.crossOrigin = 'Anonymous';
       img.onload = () => {
-        const canvas = getSharedCanvas();
+        const canvas = document.createElement('canvas');
         canvas.width = img.naturalWidth;
         canvas.height = img.naturalHeight;
         const ctx = canvas.getContext('2d', { willReadFrequently: true });

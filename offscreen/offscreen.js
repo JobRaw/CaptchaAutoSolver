@@ -16,52 +16,48 @@ const TARGET_HEIGHT = 64;
 
 let ortSession = null;
 let charset = null;
-let isInitializing = false;
+let initPromise = null;
 
 // ==================== 初始化 ====================
 
 /** 初始化 ONNX Runtime 环境和模型 */
 async function initOCR() {
   if (ortSession) return;
-  if (isInitializing) {
-    // 等待正在进行的初始化完成
-    while (isInitializing) {
-      await new Promise(r => setTimeout(r, 100));
-    }
-    return;
-  }
+  if (initPromise) return initPromise;
 
-  isInitializing = true;
   console.log('[OCR Offscreen] 正在初始化 ONNX Runtime...');
 
-  try {
-    // 配置 WASM 路径，指向扩展本地文件
-    ort.env.wasm.wasmPaths = chrome.runtime.getURL('lib/onnxruntime/');
-    // 单线程模式，避免 SharedArrayBuffer 跨域隔离问题
-    ort.env.wasm.numThreads = 1;
-    // 将日志级别设为 error，屏蔽 C++ 底层无用的 Shape 不匹配警告
-    ort.env.logLevel = 'error';
+  initPromise = (async () => {
+    try {
+      // 配置 WASM 路径，指向扩展本地文件
+      ort.env.wasm.wasmPaths = chrome.runtime.getURL('lib/onnxruntime/');
+      // 单线程模式，避免 SharedArrayBuffer 跨域隔离问题
+      ort.env.wasm.numThreads = 1;
+      // 将日志级别设为 error，屏蔽 C++ 底层无用的 Shape 不匹配警告
+      ort.env.logLevel = 'error';
 
-    // 并行加载模型和字符集
-    const [session, charsetData] = await Promise.all([
-      ort.InferenceSession.create(chrome.runtime.getURL(MODEL_PATH), {
-        executionProviders: ['wasm'],
-        graphOptimizationLevel: 'all',
-        logSeverityLevel: 4 // 0:verbose, 1:info, 2:warning, 3:error, 4:fatal，彻底屏蔽底层警告
-      }),
-      fetch(chrome.runtime.getURL(CHARSET_PATH)).then(r => r.json())
-    ]);
+      // 并行加载模型和字符集
+      const [session, charsetData] = await Promise.all([
+        ort.InferenceSession.create(chrome.runtime.getURL(MODEL_PATH), {
+          executionProviders: ['wasm'],
+          graphOptimizationLevel: 'all',
+          logSeverityLevel: 4 // 0:verbose, 1:info, 2:warning, 3:error, 4:fatal，彻底屏蔽底层警告
+        }),
+        fetch(chrome.runtime.getURL(CHARSET_PATH)).then(r => r.json())
+      ]);
 
-    ortSession = session;
-    charset = charsetData;
+      ortSession = session;
+      charset = charsetData;
 
-    console.log(`[OCR Offscreen] ✅ 模型加载完成，字符集大小: ${charset.length}`);
-  } catch (err) {
-    console.error('[OCR Offscreen] ❌ 模型加载失败:', err);
-    throw err;
-  } finally {
-    isInitializing = false;
-  }
+      console.log(`[OCR Offscreen] ✅ 模型加载完成，字符集大小: ${charset.length}`);
+    } catch (err) {
+      console.error('[OCR Offscreen] ❌ 模型加载失败:', err);
+      initPromise = null; // 加载失败允许重试
+      throw err;
+    }
+  })();
+
+  return initPromise;
 }
 
 // ==================== 图像预处理 ====================
@@ -189,6 +185,17 @@ async function recognize(base64Image, rangeType = 6) {
   } catch (err) {
     console.error('[OCR Offscreen] ❌ 识别失败:', err);
     return { success: false, error: err.message };
+  } finally {
+    resetCanvas();
+  }
+}
+
+/** 重置 Canvas 尺寸，及时释放显存与内存 */
+function resetCanvas() {
+  const canvas = document.getElementById('preprocess-canvas');
+  if (canvas) {
+    canvas.width = 1;
+    canvas.height = 1;
   }
 }
 
@@ -565,6 +572,8 @@ async function detectSliderGap(bgBase64, pieceBase64, initialLeft = 0) {
   } catch (err) {
     console.error('[OCR Offscreen] ❌ 缺口检测异常:', err);
     return { success: false, error: err.message };
+  } finally {
+    resetCanvas();
   }
 }
 
@@ -735,6 +744,8 @@ async function detectRotationAngle(outerBase64, innerBase64, cx, cy, radius, inn
   } catch (err) {
     console.error("[OCR Offscreen] ❌ 旋转角度检测异常:", err);
     return { success: false, bestAngle: 0, confidence: 0, error: err.message };
+  } finally {
+    resetCanvas();
   }
 }
 
