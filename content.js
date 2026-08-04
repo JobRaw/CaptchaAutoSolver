@@ -1252,38 +1252,41 @@
 
   function generateHumanTrack(distance) {
     const points = [];
-    const totalDuration = 600 + Math.random() * 600; // 600~1200ms
-    const steps = 30 + Math.floor(Math.random() * 20); // 30~50步
+    const totalDuration = 800 + Math.random() * 700; // 800~1500ms
+    const steps = 40 + Math.floor(Math.random() * 30); // 40~70步
 
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
       
-      // 三段式缓动：快加速 → 匀速 → 慢减速
+      // 更复杂的非线性缓动：人类通常是前期快速拉动，中后期开始试探性微调对准
       let easedT;
-      if (t < 0.4) {
-        // 加速阶段：easeIn
-        easedT = 2 * t * t;
-      } else if (t < 0.75) {
-        // 匀速阶段
-        easedT = 0.32 + (t - 0.4) * 1.6;
+      if (t < 0.6) {
+        // 加速和快速滑动
+        easedT = 1 - Math.pow(1 - (t / 0.6), 3);
+        easedT *= 0.85; // 60% 的时间走到 85% 的距离
       } else {
-        // 减速阶段：easeOut
-        const rem = (t - 0.75) / 0.25;
-        easedT = 0.88 + 0.12 * (1 - Math.pow(1 - rem, 3));
+        // 慢速试探和微调
+        const rem = (t - 0.6) / 0.4;
+        easedT = 0.85 + 0.15 * Math.sin(rem * Math.PI / 2);
       }
 
       const x = Math.round(distance * easedT);
-      const y = Math.round((Math.random() - 0.5) * 4); // ±2px Y轴抖动
+      // Y轴使用更平滑的随机漫步，而不是每步都跳动
+      const prevY = i > 0 ? points[i - 1].y : 0;
+      const y = Math.round(prevY + (Math.random() - 0.5) * 2); 
       const time = Math.round(totalDuration * t);
       points.push({ x, y, time });
     }
 
-    // 末尾添加2~3个微回弹点（模拟过冲修正）
-    const overshoot = 2 + Math.floor(Math.random() * 3); // 过冲2~4px
+    // 终点处的微调、回退和停留
+    const overshoot = Math.floor(Math.random() * 4); 
     const lastTime = points[points.length - 1].time;
-    points.push({ x: distance + overshoot, y: 0, time: lastTime + 50 });
-    points.push({ x: distance + Math.floor(overshoot / 2), y: 0, time: lastTime + 100 });
-    points.push({ x: distance, y: 0, time: lastTime + 150 });
+    if (overshoot > 0) {
+      points.push({ x: distance + overshoot, y: points[points.length - 1].y, time: lastTime + 100 });
+      points.push({ x: distance + Math.floor(overshoot / 2), y: 0, time: lastTime + 200 });
+    }
+    // 释放前的停顿（人类对准后通常会停顿一下再松手）
+    points.push({ x: distance, y: 0, time: lastTime + 300 + Math.random() * 200 });
 
     return points;
   }
@@ -1295,28 +1298,36 @@
 
     const track = generateHumanTrack(distance);
 
-    // 1. 创建 UI MouseEvent/PointerEvent
-    const createMouseEvent = (type, x, y, buttons = 1) => {
-      const evt = new MouseEvent(type, {
-        bubbles: true, cancelable: true, composed: true,
-        clientX: x, clientY: y, screenX: x, screenY: y,
-        button: 0, buttons: buttons
-      });
-      Object.defineProperty(evt, 'pageX', { value: x, configurable: true });
-      Object.defineProperty(evt, 'pageY', { value: y, configurable: true });
-      return evt;
+    const createPointerEvent = (type, x, y, buttons = 1) => {
+      try {
+        return new PointerEvent(type, {
+          bubbles: true, cancelable: true, composed: true,
+          clientX: x, clientY: y, screenX: x, screenY: y,
+          button: type.endsWith('up') ? 0 : (buttons > 0 ? 0 : -1),
+          buttons: buttons,
+          pointerId: 1,
+          pointerType: 'mouse',
+          isPrimary: true,
+          pressure: type.endsWith('up') ? 0 : 0.5
+        });
+      } catch (e) { return null; }
     };
 
-    // 2. 创建真实 TouchEvent（适配移动端和 Vue Mobile 组件）
+    const createMouseEvent = (type, x, y, buttons = 1) => {
+      return new MouseEvent(type, {
+        bubbles: true, cancelable: true, composed: true,
+        clientX: x, clientY: y, screenX: x, screenY: y,
+        button: type.endsWith('up') ? 0 : (buttons > 0 ? 0 : -1),
+        buttons: buttons
+      });
+    };
+
     const createTouchEvent = (type, target, x, y) => {
       try {
         const touch = new Touch({
-          identifier: Date.now(),
-          target: target,
-          clientX: x, clientY: y,
-          pageX: x, pageY: y,
-          screenX: x, screenY: y,
-          radiusX: 2.5, radiusY: 2.5, rotationAngle: 10, force: 0.5
+          identifier: 1, target: target,
+          clientX: x, clientY: y, pageX: x, pageY: y, screenX: x, screenY: y,
+          radiusX: 11.5, radiusY: 11.5, rotationAngle: 0, force: 1
         });
         return new TouchEvent(type, {
           cancelable: true, bubbles: true, composed: true,
@@ -1324,27 +1335,28 @@
           targetTouches: type === 'touchend' ? [] : [touch],
           changedTouches: [touch]
         });
-      } catch (e) {
-        // Fallback for environments that don't support new Touch()
-        const evt = document.createEvent('Event');
-        evt.initEvent(type, true, true);
-        const touchObj = { clientX: x, clientY: y, pageX: x, pageY: y, target: target };
-        evt.touches = type === 'touchend' ? [] : [touchObj];
-        evt.targetTouches = evt.touches;
-        evt.changedTouches = [touchObj];
-        return evt;
-      }
+      } catch (e) { return null; }
     };
 
-    // --- 按下 Down/Start ---
-    btnEl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: startX, clientY: startY, button: 0, buttons: 1 }));
-    btnEl.dispatchEvent(createTouchEvent('touchstart', btnEl, startX, startY));
-    btnEl.dispatchEvent(createMouseEvent('mousedown', startX, startY, 1));
+    const dispatchAll = (typePrefix, target, x, y, buttons) => {
+      const pe = createPointerEvent(`pointer${typePrefix}`, x, y, buttons);
+      if (pe) target.dispatchEvent(pe);
+      
+      const touchType = typePrefix === 'down' ? 'touchstart' : typePrefix === 'up' ? 'touchend' : 'touchmove';
+      const te = createTouchEvent(touchType, btnEl, x, y);
+      if (te) target.dispatchEvent(te);
+      
+      const me = createMouseEvent(`mouse${typePrefix}`, x, y, buttons);
+      target.dispatchEvent(me);
+    };
+
+    // --- Down ---
+    dispatchAll('down', btnEl, startX, startY, 1);
 
     let prevTime = 0;
     let maxOffset = 0;
     
-    // --- 沿轨迹滑动 Move ---
+    // --- Move ---
     for (const point of track) {
       const delay = point.time - prevTime;
       if (delay > 0) await sleep(delay);
@@ -1353,35 +1365,19 @@
       const moveX = startX + point.x;
       const moveY = startY + point.y;
 
-      const mouseMoveEvt = createMouseEvent('mousemove', moveX, moveY, 1);
-      const touchMoveEvt = createTouchEvent('touchmove', btnEl, moveX, moveY);
-      
-      btnEl.dispatchEvent(touchMoveEvt);
-      window.dispatchEvent(touchMoveEvt);
-      document.dispatchEvent(touchMoveEvt);
-      
-      btnEl.dispatchEvent(mouseMoveEvt);
-      window.dispatchEvent(mouseMoveEvt);
-      document.dispatchEvent(mouseMoveEvt);
+      // 分发给按钮和 Document，确保绑定在全局的事件能收到
+      dispatchAll('move', btnEl, moveX, moveY, 1);
+      dispatchAll('move', document, moveX, moveY, 1);
       
       const currentLeft = Math.round(btnEl.getBoundingClientRect().left + btnRect.width / 2);
       maxOffset = Math.max(maxOffset, Math.abs(currentLeft - startX));
     }
 
-    // --- 释放 Up/End ---
+    // --- Up ---
     const endX = startX + distance;
-    const mouseUpEvt = createMouseEvent('mouseup', endX, startY, 0);
-    const touchEndEvt = createTouchEvent('touchend', btnEl, endX, startY);
+    dispatchAll('up', btnEl, endX, startY, 0);
+    dispatchAll('up', document, endX, startY, 0);
     
-    btnEl.dispatchEvent(touchEndEvt);
-    window.dispatchEvent(touchEndEvt);
-    document.dispatchEvent(touchEndEvt);
-    
-    btnEl.dispatchEvent(mouseUpEvt);
-    window.dispatchEvent(mouseUpEvt);
-    document.dispatchEvent(mouseUpEvt);
-    
-    // 如果实际最大位移不到 5px，说明拖拽事件被页面 Vue 拦截拒绝了
     return maxOffset >= 5;
   }
 
