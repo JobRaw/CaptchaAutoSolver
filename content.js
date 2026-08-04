@@ -940,35 +940,46 @@
         innerRadius: innerRadius
       });
 
+      let angleToUse = 0;
+      let isFallback = false;
+
       if (result && result.success && typeof result.bestAngle === 'number') {
+        angleToUse = result.bestAngle;
         console.log(
           `[CaptchaSolver] ✅ 旋转角度检测成功: %c${result.bestAngle}°%c, 置信度: %c${(result.confidence || 0).toFixed(3)}`,
           'color:#2563eb; font-weight:bold;', '',
           'color:#16a34a; font-weight:bold;'
         );
-
-        // 计算滑块需要拖拽的距离
-        const trackRect = trackEl.getBoundingClientRect();
-        const btnRect = btnEl.getBoundingClientRect();
-        const dragRange = trackRect.width - btnRect.width;
-        
-        // 顺时针旋转所需角度 = (360 - result.bestAngle) % 360
-        const rotateAngle = (360 - result.bestAngle) % 360;
-        const dragDistance = Math.round((rotateAngle / 360) * dragRange);
-
-        console.log(`[CaptchaSolver] 匹配角度 ${result.bestAngle}° → 顺时针旋转角度 ${rotateAngle}° → 拖拽距离 ${dragDistance}px (轨道可用范围: ${dragRange}px)`);
-
-        // 执行模拟拖拽
-        const dragSuccess = await simulateSliderDrag(btnEl, trackEl, dragDistance);
-        if (!dragSuccess) {
-          throw new Error('拖拽被拦截');
-        }
-
-        btnEl.dataset.rotationSolved = 'true';
-        showNotice(btnEl, `✅ 旋转验证码已完成 (${result.bestAngle}°)`, 2500);
-        showTransientGlow(btnEl, '#10b981', 'rgba(16, 185, 129, 0.85)');
       } else {
-        throw new Error((result && result.error) || '旋转角度检测失败');
+        angleToUse = Math.floor(Math.random() * 360);
+        isFallback = true;
+        console.warn(`[CaptchaSolver] ⚠️ 旋转角度检测失败, 使用随机角度尝试: ${angleToUse}° 以便触发刷新。错误: ${(result && result.error) || '未知错误'}`);
+        showNotice(btnEl, `⚠️ 检测失败，尝试随机拖拽以刷新...`, 2000);
+      }
+
+      // 计算滑块需要拖拽的距离
+      const trackRect = trackEl.getBoundingClientRect();
+      const btnRect = btnEl.getBoundingClientRect();
+      const dragRange = trackRect.width - btnRect.width;
+      
+      // 顺时针旋转所需角度 = (360 - angleToUse) % 360
+      const rotateAngle = (360 - angleToUse) % 360;
+      const dragDistance = Math.round((rotateAngle / 360) * dragRange);
+
+      console.log(`[CaptchaSolver] 匹配角度 ${angleToUse}° → 顺时针旋转角度 ${rotateAngle}° → 拖拽距离 ${dragDistance}px (轨道可用范围: ${dragRange}px)`);
+
+      // 执行模拟拖拽
+      const dragSuccess = await simulateSliderDrag(btnEl, trackEl, dragDistance);
+      if (!dragSuccess) {
+        throw new Error('拖拽被拦截');
+      }
+
+      if (isFallback) {
+        showNotice(btnEl, `🔄 等待验证码刷新...`, 2500);
+      } else {
+        btnEl.dataset.rotationSolved = 'true';
+        showNotice(btnEl, `✅ 旋转验证码已完成 (${angleToUse}°)`, 2500);
+        showTransientGlow(btnEl, '#10b981', 'rgba(16, 185, 129, 0.85)');
       }
     } catch (err) {
       console.error('[CaptchaSolver] 旋转验证码处理失败:', err);
