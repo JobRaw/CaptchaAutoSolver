@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "验证码自动识别助手",
-  "version": "1.0.0",
-  "description": "基于本地极速 OCR 引擎的全自动网页图形验证码识别工具。零干预、零延迟，100% 隐私保护。",
+  "version": "2.0.0",
+  "description": "基于多维图像特征比对与本地极速引擎的验证码自动识别工具。支持极坐标 2D 矩阵旋转检测、滑块拼图与高精度 OCR 识别，智能自适应全网框架。",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
