@@ -579,110 +579,97 @@ async function detectSliderGap(bgBase64, pieceBase64, initialLeft = 0) {
 
 // ==================== 旋转验证码带状极坐标匹配 ====================
 
-/**
- * 提取指定中心的极坐标环形带（将圆环区域展开成矩形）
- * @param {ImageData} imageData
- * @param {number} cx 圆心
- * @param {number} cy 圆心
- * @param {number} radius 中心半径
- * @param {number} bandWidth 向内外延伸的像素宽度（总厚度 2 * bandWidth）
- * @param {number} sampleCount 角度采样数
- * @returns {Float32Array} 一维数组存储的 2D 矩阵 (行数: sampleCount, 列数: 2*bandWidth+1)
- */
-function extractPolarBand(imageData, cx, cy, radius, bandWidth, sampleCount) {
+function extractPolarRows(imageData, cx, cy, radius, bandWidth, sampleCount) {
   const { data, width, height } = imageData;
   const numRadii = bandWidth * 2 + 1;
-  const polar = new Float32Array(sampleCount * numRadii);
+  const rows = [];
 
-  for (let i = 0; i < sampleCount; i++) {
-    const angle = (2 * Math.PI * i) / sampleCount;
-    const cosA = Math.cos(angle);
-    const sinA = Math.sin(angle);
-
-    for (let dr = -bandWidth; dr <= bandWidth; dr++) {
-      const r = radius + dr;
-      const px = Math.round(cx + r * cosA);
-      const py = Math.round(cy + r * sinA);
+  for (let dr = -bandWidth; dr <= bandWidth; dr++) {
+    const r = radius + dr;
+    const row = new Float32Array(sampleCount);
+    let validPixels = 0;
+    
+    for (let i = 0; i < sampleCount; i++) {
+      const angle = (2 * Math.PI * i) / sampleCount;
+      const px = Math.round(cx + r * Math.cos(angle));
+      const py = Math.round(cy + r * Math.sin(angle));
       
-      const pIdx = i * numRadii + (dr + bandWidth);
       if (px >= 0 && px < width && py >= 0 && py < height) {
         const idx = (py * width + px) * 4;
-        const alpha = data[idx + 3] / 255.0; // 提取 Alpha 通道
-        polar[pIdx] = (0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]) * alpha;
+        const alpha = data[idx + 3];
+        if (alpha > 10) { // 非完全透明
+          row[i] = (0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2]);
+          validPixels++;
+        } else {
+          row[i] = -1; // 标记为无效
+        }
       } else {
-        polar[pIdx] = 0;
+        row[i] = -1;
       }
     }
+    
+    // 计算该行的方差（仅有效像素）
+    let sum = 0, sqSum = 0;
+    for (let i = 0; i < sampleCount; i++) {
+      if (row[i] >= 0) {
+        sum += row[i];
+        sqSum += row[i] * row[i];
+      }
+    }
+    const mean = validPixels > 0 ? sum / validPixels : 0;
+    const variance = validPixels > 0 ? (sqSum / validPixels) - (mean * mean) : 0;
+    
+    rows.push({ data: row, validCount: validPixels, variance: variance, r: r, dr: dr });
   }
-  return polar;
+  return rows;
 }
 
-/**
- * 计算两个二维极坐标带之间的 2D ZNCC 相关度
- * @param {Float32Array} outerBand 外部带
- * @param {Float32Array} innerBand 内部带
- * @param {number} numAngles 角度数量
- * @param {number} numRadii 半径数量
- * @param {number} shiftAngles 内部带循环偏移的角度数
- * @returns {number} ZNCC 值
- */
-function polarBandZNCC(outerBand, innerBand, numAngles, numRadii, shiftAngles) {
-  let sumO = 0, sumI = 0;
-  const N = numAngles * numRadii;
-
-  // 第一遍：计算均值
-  for (let a = 0; a < numAngles; a++) {
-    const outerRowOffset = a * numRadii;
-    const innerRowOffset = (((a + shiftAngles) % numAngles + numAngles) % numAngles) * numRadii;
-    for (let r = 0; r < numRadii; r++) {
-      sumO += outerBand[outerRowOffset + r];
-      sumI += innerBand[innerRowOffset + r];
+function zncc1D(rowO, rowI, sampleCount, shift) {
+  let sumO = 0, sumI = 0, count = 0;
+  // 必须内外都有有效像素才参与计算
+  for (let a = 0; a < sampleCount; a++) {
+    const valO = rowO[a];
+    const valI = rowI[(a + shift) % sampleCount];
+    if (valO >= 0 && valI >= 0) {
+      sumO += valO;
+      sumI += valI;
+      count++;
     }
   }
-  const meanO = sumO / N;
-  const meanI = sumI / N;
+  
+  if (count < sampleCount * 0.5) return -1; // 有效重叠太少
 
-  // 第二遍：计算方差和协方差
+  const meanO = sumO / count;
+  const meanI = sumI / count;
+  
   let cov = 0, varO = 0, varI = 0;
-  for (let a = 0; a < numAngles; a++) {
-    const outerRowOffset = a * numRadii;
-    const innerRowOffset = (((a + shiftAngles) % numAngles + numAngles) % numAngles) * numRadii;
-    for (let r = 0; r < numRadii; r++) {
-      const o = outerBand[outerRowOffset + r] - meanO;
-      const ii = innerBand[innerRowOffset + r] - meanI;
-      cov += o * ii;
+  for (let a = 0; a < sampleCount; a++) {
+    const valO = rowO[a];
+    const valI = rowI[(a + shift) % sampleCount];
+    if (valO >= 0 && valI >= 0) {
+      const o = valO - meanO;
+      const i = valI - meanI;
+      cov += o * i;
       varO += o * o;
-      varI += ii * ii;
+      varI += i * i;
     }
   }
-
+  
   const denom = Math.sqrt(varO * varI);
-  return denom > 0 ? cov / denom : 0;
+  return denom > 0 ? cov / denom : -1;
 }
 
-/**
- * 检测旋转验证码的正确旋转角度（极坐标带状模板匹配法）
- * @param {string} outerBase64
- * @param {string} innerBase64
- * @param {number} cx
- * @param {number} cy
- * @param {number} radius
- * @param {number} innerRadius
- * @returns {Promise<{success: boolean, bestAngle: number, confidence: number}>}
- */
 async function detectRotationAngle(outerBase64, innerBase64, cx, cy, radius, innerRadius) {
   try {
     const canvas = document.getElementById("preprocess-canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
-    // 加载外部背景图
     const outerImg = await loadImage(outerBase64);
     canvas.width = outerImg.width;
     canvas.height = outerImg.height;
     ctx.drawImage(outerImg, 0, 0);
     const outerData = ctx.getImageData(0, 0, outerImg.width, outerImg.height);
 
-    // 加载圆形旋转内容图
     const innerImg = await loadImage(innerBase64);
     canvas.width = innerImg.width;
     canvas.height = innerImg.height;
@@ -697,49 +684,62 @@ async function detectRotationAngle(outerBase64, innerBase64, cx, cy, radius, inn
     if (!cx || cx <= 0) cx = outerImg.width / 2;
     if (!cy || cy <= 0) cy = outerImg.height / 2;
 
-    // 采样点与带宽
-    const sampleCount = 360; // 固定采样 360 度，方便计算
-    const bandWidth = 8;     // ±8像素，总带宽 17 像素，极强抗偏移干扰
-    const numRadii = bandWidth * 2 + 1;
+    const sampleCount = 360;
+    const bandWidth = 18; // 进一步扩大带宽至 18，极强抗半径误差 (厚度37px)
 
-    // 将内外图像环形区域拉直成 2D 矩形
-    const outerBand = extractPolarBand(outerData, cx, cy, radius, bandWidth, sampleCount);
-    const innerBand = extractPolarBand(innerData, innerCx, innerCy, innerRadius, bandWidth, sampleCount);
+    const outerRows = extractPolarRows(outerData, cx, cy, radius, bandWidth, sampleCount);
+    const innerRows = extractPolarRows(innerData, innerCx, innerCy, innerRadius, bandWidth, sampleCount);
 
-    console.log(`[OCR Offscreen] 2D 旋转匹配: 中心(${cx}, ${cy}), 外部R=${radius}, 内部R=${innerRadius}, 带宽=${bandWidth}`);
+    // 过滤掉透明行或纯色无纹理行 (降低 variance 阈值到 5，防止平滑的天空背景被误杀)
+    const validOuter = outerRows.filter(r => r.validCount > sampleCount * 0.8 && r.variance > 5);
+    const validInner = innerRows.filter(r => r.validCount > sampleCount * 0.8 && r.variance > 5);
+
+    if (validOuter.length === 0 || validInner.length === 0) {
+      throw new Error('图像缺乏有效纹理特征，可能全部为纯色或透明');
+    }
 
     let bestAngle = 0;
     let bestScore = -Infinity;
+    let bestPair = null;
 
-    // 全局 360 度 2D 模板平移匹配
-    for (let deg = 0; deg < 360; deg += 3) { // 粗搜 3度步长
-      const score = polarBandZNCC(outerBand, innerBand, sampleCount, numRadii, deg);
-      if (score > bestScore) {
-        bestScore = score;
-        bestAngle = deg;
+    // 粗搜 (放开所有 dr 的组合，彻底解决缩放比例和半径计算偏差的问题)
+    for (const rowO of validOuter) {
+      for (const rowI of validInner) {
+        for (let deg = 0; deg < 360; deg += 3) {
+          const score = zncc1D(rowO.data, rowI.data, sampleCount, deg);
+          if (score > bestScore) {
+            bestScore = score;
+            bestAngle = deg;
+            bestPair = { o: rowO.dr, i: rowI.dr, rO: rowO.r, rI: rowI.r };
+          }
+        }
       }
     }
 
-    console.log(`[OCR Offscreen] 粗搜索最优角度: ${bestAngle}°, ZNCC: ${bestScore.toFixed(4)}`);
-
-    // 细搜 ±5度
-    const fineStart = bestAngle - 5;
-    const fineEnd = bestAngle + 5;
-    for (let deg = fineStart; deg <= fineEnd; deg++) {
-      const normalizedDeg = ((deg % 360) + 360) % 360;
-      const score = polarBandZNCC(outerBand, innerBand, sampleCount, numRadii, normalizedDeg);
-      if (score > bestScore) {
-        bestScore = score;
-        bestAngle = normalizedDeg;
+    // 细搜
+    if (bestPair) {
+      const fineStart = bestAngle - 5;
+      const fineEnd = bestAngle + 5;
+      const rowO = validOuter.find(r => r.dr === bestPair.o);
+      const rowI = validInner.find(r => r.dr === bestPair.i);
+      
+      for (let deg = fineStart; deg <= fineEnd; deg++) {
+        const normalizedDeg = ((deg % 360) + 360) % 360;
+        const score = zncc1D(rowO.data, rowI.data, sampleCount, normalizedDeg);
+        if (score > bestScore) {
+          bestScore = score;
+          bestAngle = normalizedDeg;
+        }
       }
     }
 
-    console.log(`[OCR Offscreen] ✅ 精搜索最终角度: ${bestAngle}°, ZNCC: ${bestScore.toFixed(4)}`);
+    console.log(`[OCR Offscreen] 跨边界 1D ZNCC: 最佳角度 ${bestAngle}°, 置信度: ${bestScore.toFixed(4)}, 匹配的偏移层 dr: [外 ${bestPair?.o}, 内 ${bestPair?.i}]`);
 
     return {
-      success: bestScore > 0.05,
+      success: bestScore > 0.08,
       bestAngle: bestAngle,
-      confidence: Math.max(0, bestScore)
+      confidence: Math.max(0, bestScore),
+      error: bestScore <= 0.08 ? `置信度过低 (${bestScore.toFixed(3)} <= 0.08)` : null
     };
   } catch (err) {
     console.error("[OCR Offscreen] ❌ 旋转角度检测异常:", err);

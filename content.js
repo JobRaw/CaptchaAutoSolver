@@ -724,18 +724,28 @@
 
     // 获取当前背景图来源（src 或 css background）
     const currentSrc = bgEl.src || bgEl.style.backgroundImage || '';
+    const now = Date.now();
 
-    // 防重复：如果已处理过，且图片没有变，则跳过；如果图片变了，说明用户点击了刷新，重置状态
-    if (btnEl.dataset.sliderSolved === 'true') {
-      if (btnEl.dataset.sliderSrc === currentSrc) {
-        return;
-      } else {
-        btnEl.dataset.sliderSolved = 'false'; // 图片变了，重置状态
-      }
+    if (btnEl.dataset.sliderSrc !== currentSrc) {
+      btnEl.dataset.sliderSrc = currentSrc;
+      btnEl.dataset.sliderSrcTime = now.toString();
+      btnEl.dataset.sliderSolved = 'false';
     }
-    
-    // 记录本次处理的图片
-    btnEl.dataset.sliderSrc = currentSrc;
+
+    if (btnEl.dataset.sliderSolved === 'true') {
+      return; // 已成功解决该图，等待图片变化
+    }
+
+    // 防抖与加载等待：新图片出现后，强制等待 500ms
+    const timeSinceNewSrc = now - parseInt(btnEl.dataset.sliderSrcTime || '0');
+    if (timeSinceNewSrc < 500) {
+      return; 
+    }
+
+    // 失败冷却期：如果刚失败不久，等待 2000ms 后再试
+    if (btnEl.dataset.sliderFailedTime && now - parseInt(btnEl.dataset.sliderFailedTime) < 2000) {
+      return;
+    }
 
     // 校验背景图片是否加载完成且不是透明/占位
     if (!isCaptchaValid(bgEl)) return;
@@ -806,6 +816,7 @@
     } catch (err) {
       console.error('[CaptchaSolver] 滑动验证码处理失败:', err);
       showNotice(btnEl, `⚠️ ${err.message}`, 3000);
+      btnEl.dataset.sliderFailedTime = Date.now().toString();
     } finally {
       isSliderProcessing = false;
     }
@@ -880,16 +891,28 @@
 
     // 获取当前图像来源（防重复）
     const currentSrc = outerEl.src || outerEl.getAttribute('src') || outerEl.style.backgroundImage || '';
+    const now = Date.now();
 
-    if (btnEl.dataset.rotationSolved === 'true') {
-      if (btnEl.dataset.rotationSrc === currentSrc) {
-        return;
-      } else {
-        btnEl.dataset.rotationSolved = 'false'; // 图片变了，重置状态
-      }
+    if (btnEl.dataset.rotationSrc !== currentSrc) {
+      btnEl.dataset.rotationSrc = currentSrc;
+      btnEl.dataset.rotationSrcTime = now.toString();
+      btnEl.dataset.rotationSolved = 'false';
     }
 
-    btnEl.dataset.rotationSrc = currentSrc;
+    if (btnEl.dataset.rotationSolved === 'true') {
+      return; // 已成功解决该图，等待图片变化
+    }
+
+    // 防抖与加载等待：新图片出现后，强制等待 500ms，让 Loading 动画或过渡态结束
+    const timeSinceNewSrc = now - parseInt(btnEl.dataset.rotationSrcTime || '0');
+    if (timeSinceNewSrc < 500) {
+      return; 
+    }
+
+    // 失败冷却期：如果刚失败不久，等待 2000ms 后再试，避免疯狂重试导致的验证码抽搐
+    if (btnEl.dataset.rotationFailedTime && now - parseInt(btnEl.dataset.rotationFailedTime) < 2000) {
+      return;
+    }
 
     // 校验图片是否加载完成（兼容 img/canvas/div 背景图）
     const outerReady = isRotationImageReady(outerEl);
@@ -951,10 +974,11 @@
           'color:#16a34a; font-weight:bold;'
         );
       } else {
-        angleToUse = Math.floor(Math.random() * 360);
-        isFallback = true;
-        console.warn(`[CaptchaSolver] ⚠️ 旋转角度检测失败, 使用随机角度尝试: ${angleToUse}° 以便触发刷新。错误: ${(result && result.error) || '未知错误'}`);
-        showNotice(btnEl, `⚠️ 检测失败，尝试随机拖拽以刷新...`, 2000);
+        const errMsg = (result && result.error) || '未知错误';
+        console.warn(`[CaptchaSolver] ⚠️ 旋转角度检测失败 (${errMsg})，可能是图片仍在加载中或不支持。进入冷却等待...`);
+        showNotice(btnEl, `⏳ 识别失败或加载中，等待重试...`, 2000);
+        btnEl.dataset.rotationFailedTime = Date.now().toString();
+        return; // 绝对不乱拖拽，直接中止本次循环，等待冷却
       }
 
       // 计算滑块需要拖拽的距离
@@ -974,13 +998,9 @@
         throw new Error('拖拽被拦截');
       }
 
-      if (isFallback) {
-        showNotice(btnEl, `🔄 等待验证码刷新...`, 2500);
-      } else {
-        btnEl.dataset.rotationSolved = 'true';
-        showNotice(btnEl, `✅ 旋转验证码已完成 (${angleToUse}°)`, 2500);
-        showTransientGlow(btnEl, '#10b981', 'rgba(16, 185, 129, 0.85)');
-      }
+      btnEl.dataset.rotationSolved = 'true';
+      showNotice(btnEl, `✅ 旋转验证码已完成 (${angleToUse}°)`, 2500);
+      showTransientGlow(btnEl, '#10b981', 'rgba(16, 185, 129, 0.85)');
     } catch (err) {
       console.error('[CaptchaSolver] 旋转验证码处理失败:', err);
       showNotice(btnEl, `⚠️ ${err.message}`, 3000);
