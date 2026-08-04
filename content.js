@@ -894,20 +894,9 @@
     const now = Date.now();
 
     if (btnEl.dataset.rotationSrc !== currentSrc) {
-      const isFailedRetry = (btnEl.dataset.rotationSolved === 'true');
-      
       btnEl.dataset.rotationSrc = currentSrc;
       btnEl.dataset.rotationSrcTime = now.toString();
       btnEl.dataset.rotationSolved = 'false';
-
-      if (isFailedRetry) {
-        console.log(`%c[CaptchaSolver] ❌ 检测到验证码图片刷新，说明上一轮拖拽未通过服务器校验（验证失败）！即将重试...`, 'color: #dc2626; font-size: 13px; font-weight: bold;');
-        if (btnEl.dataset.lastMetrics) {
-          const m = JSON.parse(btnEl.dataset.lastMetrics);
-          m.outcome = 'FAIL';
-          console.log(`%c[DATA_COLLECTION] ${JSON.stringify(m)}`, 'background: #fee2e2; color: #991b1b; padding: 2px 4px; font-family: monospace;');
-        }
-      }
     }
 
     if (btnEl.dataset.rotationSolved === 'true') {
@@ -1032,15 +1021,26 @@
       showNotice(btnEl, `✅ 旋转验证码已完成 (${angleToUse}°)`, 2500);
       showTransientGlow(btnEl, '#10b981', 'rgba(16, 185, 129, 0.85)');
 
-      // 埋个定时器检测是否真正成功
+      // 埋个定时器检测是否真正成功。这是唯一可靠的一锤定音判断点。
       setTimeout(() => {
-        // 如果 2.5 秒后元素已经消失（或不可见），或者没消失但依然保持 solved 状态（说明没有被强行刷新）
-        if (!document.body.contains(btnEl) || !isVisible(btnEl) || btnEl.dataset.rotationSolved === 'true') {
-           console.log(`%c[CaptchaSolver] 🎉 经过 2.5 秒观察，未检测到验证码图片刷新。太棒了，上一轮验证大概率已成功通过服务器校验！`, 'color: #16a34a; font-size: 13px; font-weight: bold;');
+        // 如果 2.5 秒后元素依然存在且可见，说明没能把这个验证码消灭掉（服务器拦截了），说明失败了
+        if (document.body.contains(btnEl) && isVisible(btnEl)) {
+           console.log(`%c[CaptchaSolver] ❌ 经过 2.5 秒观察，验证码依然存在，说明上一轮拖拽未通过服务器校验（验证失败）！`, 'color: #dc2626; font-size: 13px; font-weight: bold;');
+           if (btnEl.dataset.lastMetrics) {
+             const m = JSON.parse(btnEl.dataset.lastMetrics);
+             m.outcome = 'FAIL';
+             console.log(`%c[DATA_COLLECTION] ${JSON.stringify(m)}`, 'background: #fee2e2; color: #991b1b; padding: 2px 4px; font-family: monospace;');
+             btnEl.dataset.lastMetrics = ''; // 防止重复打印
+           }
+           btnEl.dataset.rotationSolved = 'false'; // 允许重新开始扫描
+        } else {
+           // 元素不见了，说明通关了！
+           console.log(`%c[CaptchaSolver] 🎉 经过 2.5 秒观察，验证码已消失，大概率已成功通过校验！`, 'color: #16a34a; font-size: 13px; font-weight: bold;');
            if (btnEl.dataset.lastMetrics) {
              const m = JSON.parse(btnEl.dataset.lastMetrics);
              m.outcome = 'SUCCESS';
              console.log(`%c[DATA_COLLECTION] ${JSON.stringify(m)}`, 'background: #dcfce7; color: #166534; padding: 2px 4px; font-family: monospace;');
+             btnEl.dataset.lastMetrics = '';
            }
         }
       }, 2500);

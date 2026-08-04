@@ -760,8 +760,14 @@ async function detectRotationAngle(outerBase64, innerBase64, cx, cy, radius, inn
     try {
       const v1BandWidth = 8;
       const v1NumRadii = v1BandWidth * 2 + 1;
-      const outerBand = extractPolarBand(outerData, cx, cy, radius, v1BandWidth, sampleCount);
-      const innerBand = extractPolarBand(innerData, innerCx, innerCy, innerRadius, v1BandWidth, sampleCount);
+      
+      // 关键修复：为了让 V1 采样带完全落在内图的有效像素内（避开透明边缘和抗锯齿边框带来的干扰）
+      // 我们将极坐标提取环向内收缩，选用 65% 处作为 V1 的采样中心
+      const v1Radius = Math.round(radius * 0.65);
+      const v1InnerRadius = Math.round(innerRadius * 0.65);
+      
+      const outerBand = extractPolarBand(outerData, cx, cy, v1Radius, v1BandWidth, sampleCount);
+      const innerBand = extractPolarBand(innerData, innerCx, innerCy, v1InnerRadius, v1BandWidth, sampleCount);
 
       for (let deg = 0; deg < 360; deg += 3) {
         const score = polarBandZNCC(outerBand, innerBand, sampleCount, v1NumRadii, deg);
