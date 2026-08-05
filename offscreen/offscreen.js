@@ -1085,7 +1085,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message.type === 'rotation-detect') {
-    detectRotationAngle(message.outerImage, message.innerImage, message.cx || 0, message.cy || 0, message.radius || 0, message.innerRadius || 0)
+    detectRotationAngle(message.outerImage, message.innerImage, message.cx || 0, message.cy || 0, message.radius || 0, message.innerRadius || 0, message.algoOptions || {})
       .then(sendResponse)
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;

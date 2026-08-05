@@ -161,7 +161,8 @@ async function handleRotationRequest(message, sender) {
       cx: message.cx || 0,
       cy: message.cy || 0,
       radius: message.radius || 0,
-      innerRadius: message.innerRadius || 0
+      innerRadius: message.innerRadius || 0,
+      algoOptions: message.algoOptions || {}
     });
 
     // 每次处理完请求后，重置闲置计时器

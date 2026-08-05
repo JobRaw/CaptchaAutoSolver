@@ -13,7 +13,13 @@
       <p class="subtitle">针对特殊命名网站配置 CSS 选择器匹配规则</p>
     </div>
 
-    <div class="form-card">
+    <div class="tabs">
+      <div class="tab active" data-target="rulesPanel">⚙️ 匹配规则配置</div>
+      <div class="tab" data-target="memoryPanel">🧠 自适应记忆管理</div>
+    </div>
+
+    <!-- 匹配规则面板 -->
+    <div class="form-card panel active" id="rulesPanel">
       <h3 class="section-title">📷 普通图形验证码选择器</h3>
       <div class="form-group">
         <label for="customImgSelector">自定义验证码图片 CSS 选择器</label>
@@ -63,6 +69,37 @@
         <button class="btn btn-primary" id="saveBtn">保存配置</button>
         <button class="btn btn-secondary" id="resetBtn">恢复默认</button>
         <span class="save-toast" id="toast">✅ 保存成功！已同步应用</span>
+      </div>
+    </div>
+
+    <!-- 记忆库面板 -->
+    <div class="form-card panel" id="memoryPanel">
+      <div class="memory-header">
+        <h3 class="section-title" style="margin: 0;">旋转验证码自适应记忆库</h3>
+        <button class="btn" id="clearAllMemoryBtn" style="background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); padding: 4px 12px; font-size: 13px;">清空全部记忆</button>
+      </div>
+      <p class="help-text" style="margin-bottom: 15px;">此处记录了所有验证失败后经过自适应试探成功的图片及其最终纠正偏移量。您可以通过控制台找到 Hash Key 并在下方手动搜索修改。</p>
+      
+      <div class="form-group">
+        <input type="text" id="memorySearchInput" placeholder="🔍 搜索 Hash Key (如 img_1a2b3c)...">
+      </div>
+
+      <div class="memory-list-container">
+        <table class="memory-table">
+          <thead>
+            <tr>
+              <th>Hash Key</th>
+              <th>状态</th>
+              <th>偏移量 (Offset)</th>
+              <th>最后更新</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="memoryTableBody">
+            <!-- JS 渲染内容 -->
+          </tbody>
+        </table>
+        <div id="memoryEmptyState" style="display: none; text-align: center; padding: 40px; color: #6b7280; font-size: 14px;">暂无记忆数据</div>
       </div>
     </div>
   </div>

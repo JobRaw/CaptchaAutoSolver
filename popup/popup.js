@@ -46,6 +46,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // 打开记忆管理页
+  const openMemoryBtn = document.getElementById('openMemoryBtn');
+  if (openMemoryBtn) {
+    openMemoryBtn.addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('options/options.html#memory') });
+    });
+  }
+
   // 打开设置页
   openOptions.addEventListener('click', () => {
     if (chrome.runtime.openOptionsPage) {
