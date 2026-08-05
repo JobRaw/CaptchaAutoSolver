@@ -1446,6 +1446,7 @@
 
     // --- Up ---
     const endX = startX + distance;
+    await sleep(150); // 解决“即将到达目标角度的抽动”导致提前触发验证的问题
     dispatchAll('up', btnEl, endX, startY, 0);
     dispatchAll('up', document, endX, startY, 0);
     

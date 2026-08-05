@@ -850,6 +850,10 @@ async function detectRotationAngle(outerBase64, innerBase64, cx, cy, radius, inn
       innerRadius = radius;
     }
 
+    // 收缩比对半径，避开内外圆拼接处的锯齿、黑边或半透明毛刺干扰
+    radius = Math.max(10, radius - 2);
+    innerRadius = Math.max(10, innerRadius - 2);
+
     const sampleCount = 360;
     const bandWidth = 8;
     const numRadii = bandWidth * 2 + 1;
