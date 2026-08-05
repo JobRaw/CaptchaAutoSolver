@@ -3,12 +3,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const statusDot = document.getElementById('statusDot');
   const statusText = document.getElementById('statusText');
   const openOptions = document.getElementById('openOptions');
+  const toggleV1 = document.getElementById('toggleV1');
+  const toggleV2 = document.getElementById('toggleV2');
+  const toggleV3 = document.getElementById('toggleV3');
+  const toggleCollect = document.getElementById('toggleCollect');
 
   // 读取配置
   if (chrome.storage?.sync) {
-    chrome.storage.sync.get(['enabled'], (res) => {
+    chrome.storage.sync.get(['enabled', 'algoV1', 'algoV2', 'algoV3', 'dataCollect'], (res) => {
       const isEnabled = res?.enabled !== false;
       toggleEnabled.checked = isEnabled;
+      toggleV1.checked = res?.algoV1 !== false;
+      toggleV2.checked = res?.algoV2 !== false;
+      toggleV3.checked = res?.algoV3 !== false;
+      toggleCollect.checked = res?.dataCollect !== false;
       updateUI(isEnabled);
     });
   }
@@ -19,6 +27,22 @@ document.addEventListener('DOMContentLoaded', () => {
     updateUI(isEnabled);
     if (chrome.storage?.sync) {
       chrome.storage.sync.set({ enabled: isEnabled });
+    }
+  });
+
+
+  [toggleV1, toggleV2, toggleV3, toggleCollect].forEach(el => {
+    if (el) {
+      el.addEventListener('change', () => {
+        if (chrome.storage?.sync) {
+          chrome.storage.sync.set({
+            algoV1: toggleV1.checked,
+            algoV2: toggleV2.checked,
+            algoV3: toggleV3.checked,
+            dataCollect: toggleCollect.checked
+          });
+        }
+      });
     }
   });
 

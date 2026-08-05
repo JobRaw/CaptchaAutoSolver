@@ -24,12 +24,27 @@
       </div>
     </div>
 
-    <div class="control-row">
-      <span>启用无感自动填入</span>
-      <label class="switch">
-        <input type="checkbox" id="toggleEnabled" checked>
-        <span class="slider"></span>
-      </label>
+    <div class="control-group" style="margin-bottom: 12px; background: rgba(255,255,255,0.05); padding: 10px; border-radius: 8px;">
+      <div class="control-row" style="margin-bottom: 8px;">
+        <span style="font-size: 13px;">启用无感自动填入</span>
+        <label class="switch"><input type="checkbox" id="toggleEnabled" checked><span class="slider"></span></label>
+      </div>
+      <div class="control-row" style="margin-bottom: 8px;">
+        <span style="font-size: 13px;">启用 V1 (2D极坐标)</span>
+        <label class="switch"><input type="checkbox" id="toggleV1" checked><span class="slider"></span></label>
+      </div>
+      <div class="control-row" style="margin-bottom: 8px;">
+        <span style="font-size: 13px;">启用 V2 (1D方差轮廓)</span>
+        <label class="switch"><input type="checkbox" id="toggleV2" checked><span class="slider"></span></label>
+      </div>
+      <div class="control-row" style="margin-bottom: 8px;">
+        <span style="font-size: 13px;">启用 V3 (纯色彩 ZNCC)</span>
+        <label class="switch"><input type="checkbox" id="toggleV3" checked><span class="slider"></span></label>
+      </div>
+      <div class="control-row">
+        <span style="font-size: 13px; color: #fbbf24;">开启全数据收集(打出详细日志)</span>
+        <label class="switch"><input type="checkbox" id="toggleCollect" checked><span class="slider"></span></label>
+      </div>
     </div>
 
     <div class="footer">

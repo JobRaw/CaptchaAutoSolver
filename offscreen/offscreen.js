@@ -577,11 +577,92 @@ async function detectSliderGap(bgBase64, pieceBase64, initialLeft = 0) {
   }
 }
 
-// ==================== 旋转验证码带状极坐标匹配 ====================
+// ==================== 旋转验证码带状极坐标匹配 (Color-Weighted Ring-Independent ZNCC) ====================
 
-/**
- * 提取指定中心的极坐标环形带（将圆环区域展开成矩形）- V1
- */
+function extractColorPolarRows(imageData, cx, cy, radius, bandWidth, sampleCount, ignoreBlackHole) {
+  const { data, width, height } = imageData;
+  const numRadii = bandWidth * 2 + 1;
+  const rows = [];
+
+  for (let dr = -bandWidth; dr <= bandWidth; dr++) {
+    const r = radius + dr;
+    const rowR = new Float32Array(sampleCount).fill(-1);
+    const rowG = new Float32Array(sampleCount).fill(-1);
+    const rowB = new Float32Array(sampleCount).fill(-1);
+    let validPixels = 0;
+    
+    for (let i = 0; i < sampleCount; i++) {
+      const angle = (2 * Math.PI * i) / sampleCount;
+      const px = Math.round(cx + r * Math.cos(angle));
+      const py = Math.round(cy + r * Math.sin(angle));
+      
+      if (px >= 0 && px < width && py >= 0 && py < height) {
+        const idx = (py * width + px) * 4;
+        const alpha = data[idx + 3];
+        if (alpha > 10) { 
+          if (ignoreBlackHole && data[idx] === 0 && data[idx + 1] === 0 && data[idx + 2] === 0) {
+            // Ignore anti-bot black hole
+          } else {
+            rowR[i] = data[idx];
+            rowG[i] = data[idx + 1];
+            rowB[i] = data[idx + 2];
+            validPixels++;
+          }
+        }
+      }
+    }
+    
+    rows.push({ rChannel: rowR, gChannel: rowG, bChannel: rowB, validCount: validPixels, dr: dr, r: r });
+  }
+  return rows;
+}
+
+function channelZNCC(rowO, rowI, sampleCount, shift) {
+  let sumO = 0, sumI = 0, count = 0;
+  for (let a = 0; a < sampleCount; a++) {
+    const valO = rowO[a];
+    const valI = rowI[(a + shift) % sampleCount];
+    if (valO >= 0 && valI >= 0) {
+      sumO += valO;
+      sumI += valI;
+      count++;
+    }
+  }
+  
+  if (count < sampleCount * 0.4) return -1;
+
+  const meanO = sumO / count;
+  const meanI = sumI / count;
+  
+  let cov = 0, varO = 0, varI = 0;
+  for (let a = 0; a < sampleCount; a++) {
+    const valO = rowO[a];
+    const valI = rowI[(a + shift) % sampleCount];
+    if (valO >= 0 && valI >= 0) {
+      const o = valO - meanO;
+      const i = valI - meanI;
+      cov += o * i;
+      varO += o * o;
+      varI += i * i;
+    }
+  }
+  
+  // Requires minimum variance to prevent noise amplification
+  if ((varO / count) < 10 || (varI / count) < 10) return -1;
+
+  const denom = Math.sqrt(varO * varI);
+  return denom > 0 ? cov / denom : 0;
+}
+
+function colorRingZNCC(rowO, rowI, sampleCount, shift) {
+  const zR = channelZNCC(rowO.rChannel, rowI.rChannel, sampleCount, shift);
+  const zG = channelZNCC(rowO.gChannel, rowI.gChannel, sampleCount, shift);
+  const zB = channelZNCC(rowO.bChannel, rowI.bChannel, sampleCount, shift);
+  
+  if (zR === -1 || zG === -1 || zB === -1) return -1;
+  return (zR + zG + zB) / 3;
+}
+
 function extractPolarBand(imageData, cx, cy, radius, bandWidth, sampleCount) {
   const { data, width, height } = imageData;
   const numRadii = bandWidth * 2 + 1;
@@ -727,7 +808,8 @@ function zncc1D(rowO, rowI, sampleCount, shift) {
   return denom > 0 ? cov / denom : -1;
 }
 
-async function detectRotationAngle(outerBase64, innerBase64, cx, cy, radius, innerRadius) {
+
+async function detectRotationAngle(outerBase64, innerBase64, cx, cy, radius, innerRadius, algoOptions = {}) {
   try {
     const canvas = document.getElementById("preprocess-canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -746,188 +828,247 @@ async function detectRotationAngle(outerBase64, innerBase64, cx, cy, radius, inn
 
     const innerCx = innerImg.width / 2;
     const innerCy = innerImg.height / 2;
-
     if (!radius || radius <= 0) radius = Math.min(innerImg.width, innerImg.height) / 2 - 2;
-    if (!innerRadius || innerRadius <= 0) innerRadius = Math.min(innerImg.width, innerImg.height) / 2 - 2;
-    if (!cx || cx <= 0) cx = outerImg.width / 2;
-    if (!cy || cy <= 0) cy = outerImg.height / 2;
 
-    const sampleCount = 360;
-
-    // === 运行 V1 (2D 极坐标带状匹配) ===
-    let v1BestAngle = 0;
-    let v1BestScore = -Infinity;
-    try {
-      const v1BandWidth = 8;
-      const v1NumRadii = v1BandWidth * 2 + 1;
-      
-      // 关键修复：为了让 V1 采样带完全落在内图的有效像素内（避开透明边缘和抗锯齿边框带来的干扰）
-      // 我们将极坐标提取环向内收缩，选用 65% 处作为 V1 的采样中心
-      const v1Radius = Math.round(radius * 0.65);
-      const v1InnerRadius = Math.round(innerRadius * 0.65);
-      
-      const outerBand = extractPolarBand(outerData, cx, cy, v1Radius, v1BandWidth, sampleCount);
-      const innerBand = extractPolarBand(innerData, innerCx, innerCy, v1InnerRadius, v1BandWidth, sampleCount);
-
-      for (let deg = 0; deg < 360; deg += 3) {
-        const score = polarBandZNCC(outerBand, innerBand, sampleCount, v1NumRadii, deg);
-        if (score > v1BestScore) {
-          v1BestScore = score;
-          v1BestAngle = deg;
+    // 自动探测内圆的真实物理半径（排除图片的透明边距）
+    let realInnerRadius = 0;
+    for (let y = 0; y < innerImg.height; y++) {
+      for (let x = 0; x < innerImg.width; x++) {
+        const alpha = innerData.data[(y * innerImg.width + x) * 4 + 3];
+        if (alpha > 10) {
+          const dx = x - innerCx;
+          const dy = y - innerCy;
+          const r = Math.sqrt(dx * dx + dy * dy);
+          if (r > realInnerRadius) realInnerRadius = r;
         }
       }
-      if (v1BestScore > -Infinity) {
-        const fineStart = v1BestAngle - 5;
-        const fineEnd = v1BestAngle + 5;
-        for (let deg = fineStart; deg <= fineEnd; deg++) {
-          const normalizedDeg = ((deg % 360) + 360) % 360;
-          const score = polarBandZNCC(outerBand, innerBand, sampleCount, v1NumRadii, normalizedDeg);
-          if (score > v1BestScore) {
-            v1BestScore = score;
-            v1BestAngle = normalizedDeg;
-          }
-        }
-      }
-    } catch (err) {
-      console.warn("[OCR Offscreen] V1 算法运行异常:", err);
+    }
+    // 取保守探测值，若比外部传进来的 innerRadius 小，说明有透明边距，以探测值为准
+    if (realInnerRadius > 10 && (!innerRadius || realInnerRadius < innerRadius)) {
+      innerRadius = Math.round(realInnerRadius);
+    } else if (!innerRadius) {
+      innerRadius = radius;
     }
 
-    // === 运行 V2 (1D 跨边界 ZNCC 匹配) ===
-    let v2BestAngle = 0;
-    let v2BestScore = -Infinity;
-    let v2BestPair = null;
-    let v2ErrorMsg = null;
-    try {
+    const sampleCount = 360;
+    const bandWidth = 8;
+    const numRadii = bandWidth * 2 + 1;
+
+    let v1Result = null;
+    let v2Result = null;
+    let v3Result = null;
+
+    // --- V1 (2D Grayscale ZNCC) ---
+    if (algoOptions.v1 !== false) {
+      const v1Radius = Math.round(radius * 0.65);
+      const v1InnerRadius = Math.round(innerRadius * 0.65);
+      const outerBand = extractPolarBand(outerData, cx, cy, v1Radius, bandWidth, sampleCount);
+      const innerBand = extractPolarBand(innerData, innerCx, innerCy, v1InnerRadius, bandWidth, sampleCount);
+      
+      let bestV1Angle = 0;
+      let bestV1Score = -Infinity;
+      
+      for (let i = 0; i < 360; i++) {
+        let score = polarBandZNCC(outerBand, innerBand, sampleCount, numRadii, i);
+        if (score > bestV1Score) {
+          bestV1Score = score;
+          bestV1Angle = i;
+        }
+      }
+      // 删除之前错误添加的 360 - offset 取反逻辑，保持原始极坐标匹配角度
+      v1Result = { angle: bestV1Angle, score: bestV1Score };
+    }
+
+    // --- V2 (1D Variance Profile ZNCC) ---
+    if (algoOptions.v2 !== false) {
       const v2BandWidth = 18;
       const outerRows = extractPolarRows(outerData, cx, cy, radius, v2BandWidth, sampleCount);
       const innerRows = extractPolarRows(innerData, innerCx, innerCy, innerRadius, v2BandWidth, sampleCount);
-
-      const validOuter = outerRows.filter(r => r.validCount > sampleCount * 0.8 && r.variance > 5);
-      const validInner = innerRows.filter(r => r.validCount > sampleCount * 0.8 && r.variance > 5);
-
-      if (validOuter.length === 0 || validInner.length === 0) {
-        v2ErrorMsg = 'V2: 图像缺乏有效纹理特征，可能全部为纯色或透明';
-      } else {
-        for (const rowO of validOuter) {
-          for (const rowI of validInner) {
-            for (let deg = 0; deg < 360; deg += 3) {
-              const score = zncc1D(rowO.data, rowI.data, sampleCount, deg);
-              if (score > v2BestScore) {
-                v2BestScore = score;
-                v2BestAngle = deg;
-                v2BestPair = { o: rowO.dr, i: rowI.dr, rO: rowO.r, rI: rowI.r };
+      
+      // 筛选具有足够变化(方差>5)的特征圈
+      const validOuterRows = outerRows.filter(r => r.variance > 5);
+      
+      let bestV2Angle = 0;
+      let bestV2Score = -Infinity;
+      
+      if (validOuterRows.length > 0) {
+        for (let i = 0; i < 360; i++) {
+          let totalScore = 0;
+          let validCount = 0;
+          
+          for (const rowO of validOuterRows) {
+            const rowI = innerRows.find(r => r.dr === rowO.dr);
+            if (rowI && rowI.variance > 0) {
+              const score = zncc1D(rowO.data, rowI.data, sampleCount, i);
+              if (score !== -1) {
+                totalScore += score;
+                validCount++;
               }
             }
           }
-        }
-
-        if (v2BestPair) {
-          const fineStart = v2BestAngle - 5;
-          const fineEnd = v2BestAngle + 5;
-          const rowO = validOuter.find(r => r.dr === v2BestPair.o);
-          const rowI = validInner.find(r => r.dr === v2BestPair.i);
-          
-          for (let deg = fineStart; deg <= fineEnd; deg++) {
-            const normalizedDeg = ((deg % 360) + 360) % 360;
-            const score = zncc1D(rowO.data, rowI.data, sampleCount, normalizedDeg);
-            if (score > v2BestScore) {
-              v2BestScore = score;
-              v2BestAngle = normalizedDeg;
+          if (validCount > 0) {
+            const avgScore = totalScore / validCount;
+            if (avgScore > bestV2Score) {
+              bestV2Score = avgScore;
+              bestV2Angle = i;
             }
           }
         }
       }
-    } catch (err) {
-      console.warn("[OCR Offscreen] V2 算法运行异常:", err);
-      v2ErrorMsg = err.message;
+      // 删除之前错误添加的 360 - offset 取反逻辑，保持原始极坐标匹配角度
+      v2Result = { angle: bestV2Angle, score: bestV2Score };
     }
 
-    // === 混合决策算法 (V1定大局，V2抠细节) ===
-    const v1Str = (v1BestScore === -Infinity ? 0 : v1BestScore).toFixed(4);
-    const v2Str = (v2BestScore === -Infinity ? 0 : v2BestScore).toFixed(4);
+    // --- V3 (Color ZNCC) ---
+    if (algoOptions.v3 !== false) {
+      const v3BandWidth = 18;
+      const outerColorRows = extractColorPolarRows(outerData, cx, cy, radius, v3BandWidth, sampleCount, true);
+      const innerColorRows = extractColorPolarRows(innerData, innerCx, innerCy, innerRadius, v3BandWidth, sampleCount, false);
+      
+      let bestV3Angle = 0;
+      let bestV3Score = -Infinity;
+      
+      for (let i = 0; i < 360; i++) {
+        let totalScore = 0;
+        let validRingCount = 0;
+        for (let r = 0; r < outerColorRows.length; r++) {
+          const rowO = outerColorRows[r];
+          const rowI = innerColorRows[r];
+          if (!rowO || !rowI) continue;
+          
+          const score = colorRingZNCC(rowO, rowI, sampleCount, i);
+          if (score !== -1) {
+            const weight = Math.min(rowO.validCount, rowI.validCount);
+            totalScore += score * weight;
+            validRingCount += weight;
+          }
+        }
+        if (validRingCount > 0) {
+          const weightedScore = totalScore / validRingCount;
+          if (weightedScore > bestV3Score) {
+            bestV3Score = weightedScore;
+            bestV3Angle = i;
+          }
+        }
+      }
+      // 删除之前错误添加的 360 - offset 取反逻辑，保持原始极坐标匹配角度
+      v3Result = { angle: bestV3Angle, score: bestV3Score };
+    }
+
+    // === 聚合投票机制 (Clustering Voting) ===
+    let candidates = [];
     
-    const debugLogs = [];
-    debugLogs.push(`[OCR Offscreen] 🔍 旋转检测得分对比：`);
-    debugLogs.push(`  ➔ V1 (2D 带状匹配): 角度 ${v1BestAngle}°, 得分 ${v1Str}`);
-    debugLogs.push(`  ➔ V2 (1D 边界匹配): 角度 ${v2BestAngle}°, 得分 ${v2Str} (外层 ${v2BestPair ? v2BestPair.o : 'N/A'}, 内层 ${v2BestPair ? v2BestPair.i : 'N/A'})`);
+    // 角度差计算
+    const angDiff = (a, b) => {
+        let d = Math.abs(a - b) % 360;
+        return d > 180 ? 360 - d : d;
+    };
+
+    // 理论极值映射，用于归一化打分 (让跨算法比较更公平)
+    // 削弱 V1，增强 V2 和 V3 的话语权
+    const maxScores = { 'V3': 0.60, 'V1': 0.25, 'V2': 0.95 };
+    const normalize = (algo, score) => Math.max(0, score) / (maxScores[algo] || 1);
     
-    debugLogs.forEach(l => console.log(l));
+    // === V2 & V3 双重保险强共识 (Strong Consensus Bypass) ===
+    // 如果 V2 和 V3 计算出的角度极度接近(<=5度)，且分数没有太离谱(>0.20)
+    // 它们将无视单项及格线，直接被保送进候选池，形成绝对共识
+    let v2v3Consensus = false;
+    if (v2Result && v3Result && v2Result.score > 0.20 && v3Result.score > 0.20) {
+        if (angDiff(v2Result.angle, v3Result.angle) <= 5) {
+            v2v3Consensus = true;
+        }
+    }
+
+    if (v3Result && (v3Result.score > 0.35 || v2v3Consensus)) candidates.push({ algo: 'V3', angle: v3Result.angle, score: v3Result.score, norm: normalize('V3', v3Result.score) });
+    if (v2Result && (v2Result.score > 0.40 || v2v3Consensus)) candidates.push({ algo: 'V2', angle: v2Result.angle, score: v2Result.score, norm: normalize('V2', v2Result.score) });
+    if (v1Result && v1Result.score > 0.18) candidates.push({ algo: 'V1', angle: v1Result.angle, score: v1Result.score, norm: normalize('V1', v1Result.score) });
+
+    // 基于权重融合多个角度 (解决 360 度跨界问题)
+    const fuseAngles = (angleObjs) => {
+        let sumSin = 0, sumCos = 0;
+        angleObjs.forEach(obj => {
+            const rad = obj.angle * Math.PI / 180;
+            // 归一化得分作为融合权重
+            const weight = obj.norm || 0.1; 
+            sumSin += Math.sin(rad) * weight;
+            sumCos += Math.cos(rad) * weight;
+        });
+        let res = Math.atan2(sumSin, sumCos) * 180 / Math.PI;
+        return (res + 360) % 360;
+    };
 
     let finalAngle = 0;
     let finalConfidence = 0;
-    let success = false;
-    let errorMsg = null;
+    let chosenAlgo = 'NONE';
+    
+    if (candidates.length === 0) {
+       // 全都没达到阈值，进行归一化降维比对
+       const all = [];
+       if (v3Result) all.push({ algo: 'V3', angle: v3Result.angle, score: v3Result.score, norm: normalize('V3', v3Result.score) });
+       if (v1Result) all.push({ algo: 'V1', angle: v1Result.angle, score: v1Result.score, norm: normalize('V1', v1Result.score) });
+       if (v2Result) all.push({ algo: 'V2', angle: v2Result.angle, score: v2Result.score, norm: normalize('V2', v2Result.score) });
 
-    const v1Threshold = 0.055; 
-    const v2Threshold = 0.6; // V2 的 1D 边界匹配特征极强，及格线大幅提高到 0.6 以防噪音假阳性
-
-    const angleDiff = Math.min(Math.abs(v1BestAngle - v2BestAngle), 360 - Math.abs(v1BestAngle - v2BestAngle));
-
-    if (v1BestScore > v1Threshold) {
-      // V1 全局匹配成功，锁定了正确的大致方位
-      if (angleDiff <= 30 && v2BestScore > v2Threshold) {
-        // V1 和 V2 方向基本一致（误差在 30 度以内），且 V2 得分及格
-        // 此时 V2 的单像素边界匹配（1D）精度远高于 V1 的带状模糊匹配（2D）
-        finalAngle = v2BestAngle;
-        finalConfidence = v2BestScore;
-        success = true;
-        const log1 = `[OCR Offscreen] ✅ 最终选择: V2 (角度 ${finalAngle}°) [高精度微调]`;
-        const log2 = `[OCR Offscreen] 💡 选择原因: V1(${v1BestAngle}°)与V2(${v2BestAngle}°)大方向一致(偏差${angleDiff}°)。采用 V1 验证大局无误，采用 V2 提供像素级极高精度。`;
-        debugLogs.push(log1, log2);
-        console.log(log1); console.log(log2);
-      } else {
-        // V2 偏离太远（可能是被直线/重复纹理干扰产生的假阳性）
-        finalAngle = v1BestAngle;
-        finalConfidence = v1BestScore;
-        success = true;
-        const log1 = `[OCR Offscreen] ✅ 最终选择: V1 (角度 ${finalAngle}°) [全局求稳]`;
-        const log2 = `[OCR Offscreen] 💡 选择原因: V2 偏离 V1 太远(偏差${angleDiff}°)或分数过低(${v2Str})，判定 V2 为局部假阳性干扰。退回采用抗干扰最强的 V1。`;
-        debugLogs.push(log1, log2);
-        console.log(log1); console.log(log2);
-      }
-    } else if (v2BestScore > v2Threshold) {
-      // V1 彻底失败，V2 临危受命
-      finalAngle = v2BestAngle;
-      finalConfidence = v2BestScore;
-      success = true;
-      const log1 = `[OCR Offscreen] ✅ 最终选择: V2 (角度 ${finalAngle}°) [替补破局]`;
-      const log2 = `[OCR Offscreen] 💡 选择原因: V1全局失联(${v1Str})，但V2抓到了强烈的局部边界特征(${v2Str} > ${v2Threshold})，启用 V2 替补。`;
-      debugLogs.push(log1, log2);
-      console.log(log1); console.log(log2);
+       if (all.length > 0) {
+         // 根据归一化相对努力程度挑一个最好的
+         const best = all.reduce((max, cur) => cur.norm > max.norm ? cur : max);
+         finalAngle = best.angle;
+         finalConfidence = best.score;
+         chosenAlgo = `FALLBACK_${best.algo}`;
+       }
+    } else if (candidates.length === 1) {
+       finalAngle = candidates[0].angle;
+       finalConfidence = candidates[0].score;
+       chosenAlgo = candidates[0].algo;
     } else {
-      success = false;
-      finalAngle = 0;
-      finalConfidence = Math.max(0, v1BestScore, v2BestScore);
-      errorMsg = `算法均未达到及格线: [V1:${v1Str}, V2:${v2Str}]`;
-      const log1 = `[OCR Offscreen] ❌ 最终选择: 无 (检测失败)`;
-      debugLogs.push(log1);
-      console.log(log1);
+       // Find clusters (diff < 15 degrees)
+       let consensusFound = false;
+       for (let i = 0; i < candidates.length; i++) {
+           for (let j = i + 1; j < candidates.length; j++) {
+               if (angDiff(candidates[i].angle, candidates[j].angle) <= 15) {
+                   // 共识达成！不再只采纳优先级高的，而是进行加权融合
+                   finalAngle = Math.round(fuseAngles([candidates[i], candidates[j]]));
+                   // 置信度取两者中的较高者
+                   finalConfidence = Math.max(candidates[i].score, candidates[j].score);
+                   chosenAlgo = `CONSENSUS_${candidates[i].algo}_${candidates[j].algo}`;
+                   consensusFound = true;
+                   break;
+               }
+           }
+           if (consensusFound) break;
+       }
+       if (!consensusFound) {
+           // 互相分歧，严格按优先级取
+           const sorted = candidates.sort((a,b) => {
+               const p = {'V3': 3, 'V1': 2, 'V2': 1};
+               return p[b.algo] - p[a.algo];
+           });
+           finalAngle = sorted[0].angle;
+           finalConfidence = sorted[0].score;
+           chosenAlgo = `${sorted[0].algo}_SOLO_OVERRIDE`;
+       }
     }
 
     return {
-      success: success,
-      bestAngle: finalAngle,
-      confidence: finalConfidence,
-      error: errorMsg,
-      debugLogs: debugLogs,
+      success: true,
+      bestAngle: finalAngle || 0,
+      confidence: (finalConfidence === -Infinity || isNaN(finalConfidence)) ? 0 : finalConfidence,
       metrics: {
-        v1Angle: v1BestAngle,
-        v1Score: v1BestScore,
-        v2Angle: v2BestAngle,
-        v2Score: v2BestScore,
-        chosenAlgo: (v1BestScore > v1Threshold) ? (angleDiff <= 30 && v2BestScore > v2Threshold ? 'V2' : 'V1') : ((v2BestScore > v2Threshold) ? 'V2' : 'NONE'),
-        geo: { cx, cy, radius, innerRadius }
+        chosenAlgo: chosenAlgo
+      },
+      details: {
+        v1: v1Result,
+        v2: v2Result,
+        v3: v3Result
       }
     };
   } catch (err) {
-    console.error("[OCR Offscreen] ❌ 旋转角度检测异常:", err);
+    console.error("[OCR Offscreen] detectRotationAngle error:", err);
     return { success: false, bestAngle: 0, confidence: 0, error: err.message };
-  } finally {
-    resetCanvas();
   }
 }
 
 // ==================== 消息监听 ====================
+
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'ocr-request') {

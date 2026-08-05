@@ -156,6 +156,10 @@
   let customRotationOuterSel = '';
   let customRotationInnerSel = '';
   let customRotationBtnSel = '';
+  let algoV1Enabled = true;
+  let algoV2Enabled = true;
+  let algoV3Enabled = true;
+  let dataCollectEnabled = true;
 
   // ==================== 入口 ====================
 
@@ -174,7 +178,7 @@
   function loadUserConfig() {
     if (!chrome.storage?.sync) return;
 
-    chrome.storage.sync.get(['enabled', 'customImgSelector', 'customInputSelector', 'customSliderBgSelector', 'customSliderBtnSelector', 'customRotationOuterSelector', 'customRotationInnerSelector', 'customRotationBtnSelector'], (res) => {
+    chrome.storage.sync.get(['enabled', 'algoV1', 'algoV2', 'algoV3', 'dataCollect', 'customImgSelector', 'customInputSelector', 'customSliderBgSelector', 'customSliderBtnSelector', 'customRotationOuterSelector', 'customRotationInnerSelector', 'customRotationBtnSelector'], (res) => {
       isEnabled = res.enabled !== false;
       customImgSel = res.customImgSelector || '';
       customInputSel = res.customInputSelector || '';
@@ -183,6 +187,10 @@
       customRotationOuterSel = res.customRotationOuterSelector || '';
       customRotationInnerSel = res.customRotationInnerSelector || '';
       customRotationBtnSel = res.customRotationBtnSelector || '';
+      algoV1Enabled = res.algoV1 !== false;
+      algoV2Enabled = res.algoV2 !== false;
+      algoV3Enabled = res.algoV3 !== false;
+      dataCollectEnabled = res.dataCollect !== false;
     });
 
     chrome.storage.onChanged.addListener((changes, area) => {
@@ -195,6 +203,10 @@
       if (changes.customRotationOuterSelector) customRotationOuterSel = changes.customRotationOuterSelector.newValue || '';
       if (changes.customRotationInnerSelector) customRotationInnerSel = changes.customRotationInnerSelector.newValue || '';
       if (changes.customRotationBtnSelector) customRotationBtnSel = changes.customRotationBtnSelector.newValue || '';
+      if (changes.algoV1) algoV1Enabled = changes.algoV1.newValue !== false;
+      if (changes.algoV2) algoV2Enabled = changes.algoV2.newValue !== false;
+      if (changes.algoV3) algoV3Enabled = changes.algoV3.newValue !== false;
+      if (changes.dataCollect) dataCollectEnabled = changes.dataCollect.newValue !== false;
     });
   }
 
@@ -903,17 +915,20 @@
       return; // 已成功解决该图，等待图片变化
     }
 
-    // 图片加载状态校验：如果是 IMG 标签且尚未加载完毕（或者正在缓慢加载），直接 return 等待，不要放行去识别
+    // 图片加载状态校验：如果是 IMG 标签且尚未加载完毕，绑定 load 事件并在加载完毕后重新触发识别
     if (outerEl.tagName === 'IMG' && (!outerEl.complete || outerEl.naturalWidth === 0)) {
+      outerEl.addEventListener('load', () => debounce(scanAndSolveRotation, 500)(), { once: true });
       return;
     }
     if (innerEl.tagName === 'IMG' && (!innerEl.complete || innerEl.naturalWidth === 0)) {
+      innerEl.addEventListener('load', () => debounce(scanAndSolveRotation, 500)(), { once: true });
       return;
     }
 
     // 防抖与过渡动画等待：新图片出现后，强制等待至少 800ms，让 Loading 动画彻底消失
     const timeSinceNewSrc = now - parseInt(btnEl.dataset.rotationSrcTime || '0');
     if (timeSinceNewSrc < 800) {
+      setTimeout(() => debounce(scanAndSolveRotation, 500)(), 800 - timeSinceNewSrc);
       return; 
     }
 
@@ -928,6 +943,18 @@
     if (!outerReady || !innerReady) {
       console.log(`[CaptchaSolver] ⚠️ 图片元素尚未完全准备就绪 (outerReady=${outerReady}, innerReady=${innerReady})，等待下一次轮询...`);
       return;
+    }
+
+    // 只有经过了上面 800ms 的等待期、且图片确实加载完毕，才会到达这里。
+    // 如果到达这里，说明我们正在对一张“全新”的图片发起真正的识别。
+    // 这时如果还有残留的 pendingMetrics，那它 100% 就是上一轮验证失败留下的。
+    if (btnEl.dataset.pendingMetrics) {
+       try {
+           const m = JSON.parse(btnEl.dataset.pendingMetrics);
+           m.outcome = 'FAIL';
+           console.log(`%c[DATA_COLLECTION] ${JSON.stringify(m)}`, 'background: #fee2e2; color: #991b1b; padding: 2px 4px; font-family: monospace;');
+       } catch (e) {}
+       btnEl.dataset.pendingMetrics = '';
     }
 
     isRotationProcessing = true;
@@ -968,7 +995,13 @@
         cx: cx,
         cy: cy,
         radius: radius,
-        innerRadius: innerRadius
+        innerRadius: innerRadius,
+        algoOptions: {
+          v1: algoV1Enabled,
+          v2: algoV2Enabled,
+          v3: algoV3Enabled,
+          collect: dataCollectEnabled
+        }
       });
 
       let angleToUse = 0;
@@ -981,17 +1014,38 @@
         });
       }
 
-      if (result && result.metrics) {
-        btnEl.dataset.lastMetrics = JSON.stringify(result.metrics);
+      if (result) {
+        btnEl.dataset.pendingMetrics = JSON.stringify({
+            ...(result.metrics || {}),
+            details: result.details || {},
+            bestAngle: result.bestAngle,
+            confidence: result.confidence
+        });
       }
 
       if (result && result.success && typeof result.bestAngle === 'number') {
         angleToUse = result.bestAngle;
-        console.log(
-          `[CaptchaSolver] ✅ 旋转角度检测成功: %c${result.bestAngle}°%c, 置信度: %c${(result.confidence || 0).toFixed(3)}`,
-          'color:#2563eb; font-weight:bold;', '',
-          'color:#16a34a; font-weight:bold;'
-        );
+        
+        if (dataCollectEnabled && result.details) {
+            console.log(
+                `%c========== [DATA_COLLECTION] Scoreboard ==========\n` +
+                `%c V1(极坐标): %c${result.details.v1?.angle ?? 'N/A'}° (分: ${result.details.v1?.score?.toFixed(4) ?? 'N/A'})\n` +
+                `%c V2(方差): %c${result.details.v2?.angle ?? 'N/A'}° (分: ${result.details.v2?.score?.toFixed(4) ?? 'N/A'})\n` +
+                `%c V3(色彩): %c${result.details.v3?.angle ?? 'N/A'}° (分: ${result.details.v3?.score?.toFixed(4) ?? 'N/A'})\n` +
+                `%c🏆 最终决断 (聚类/优选): %c${result.bestAngle}° %c(置信度: ${(result.confidence ?? 0).toFixed(4)}, 策略: ${result.metrics?.chosenAlgo || 'N/A'})`,
+                'color: #d97706; font-weight: bold;',
+                'color: #2563eb;', 'font-weight:bold;',
+                'color: #059669;', 'font-weight:bold;',
+                'color: #dc2626;', 'font-weight:bold;',
+                'color: #9333ea; font-weight: bold;', 'color: #9333ea; font-weight: bold; font-size: 1.1em;', 'color: #6b7280;'
+            );
+        } else {
+            console.log(
+              `[CaptchaSolver] ✅ 旋转角度检测成功: %c${result.bestAngle}°%c, 置信度: %c${(result.confidence || 0).toFixed(3)}`,
+              'color:#2563eb; font-weight:bold;', '',
+              'color:#16a34a; font-weight:bold;'
+            );
+        }
       } else {
         const errMsg = (result && result.error) || '未知错误';
         console.warn(`[CaptchaSolver] ⚠️ 旋转角度检测失败 (${errMsg})，可能是图片仍在加载中或不支持。进入冷却等待...`);
@@ -1003,7 +1057,20 @@
       // 计算滑块需要拖拽的距离
       const trackRect = trackEl.getBoundingClientRect();
       const btnRect = btnEl.getBoundingClientRect();
-      const dragRange = trackRect.width - btnRect.width;
+      
+      // 提取滑块初始位置相对于轨道左侧的实际物理偏移 (考虑了 padding / border)
+      const initialOffset = Math.max(0, btnRect.left - trackRect.left);
+      
+      // 优先排除左右对称的初始 padding / border 偏移量
+      let dragRange = trackRect.width - btnRect.width - (initialOffset * 2);
+      
+      // 保底处理，避免某些奇葩排版下算出负数或过小
+      if (dragRange < 50) {
+         dragRange = trackEl.clientWidth - btnEl.offsetWidth;
+      }
+      if (dragRange < 50) {
+         dragRange = trackRect.width - btnRect.width;
+      }
       
       // 顺时针旋转所需角度 = (360 - angleToUse) % 360
       const rotateAngle = (360 - angleToUse) % 360;
@@ -1026,21 +1093,25 @@
         // 如果 2.5 秒后元素依然存在且可见，说明没能把这个验证码消灭掉（服务器拦截了），说明失败了
         if (document.body.contains(btnEl) && isVisible(btnEl)) {
            console.log(`%c[CaptchaSolver] ❌ 经过 2.5 秒观察，验证码依然存在，说明上一轮拖拽未通过服务器校验（验证失败）！`, 'color: #dc2626; font-size: 13px; font-weight: bold;');
-           if (btnEl.dataset.lastMetrics) {
-             const m = JSON.parse(btnEl.dataset.lastMetrics);
-             m.outcome = 'FAIL';
-             console.log(`%c[DATA_COLLECTION] ${JSON.stringify(m)}`, 'background: #fee2e2; color: #991b1b; padding: 2px 4px; font-family: monospace;');
-             btnEl.dataset.lastMetrics = ''; // 防止重复打印
+           if (btnEl.dataset.pendingMetrics) {
+             try {
+                 const m = JSON.parse(btnEl.dataset.pendingMetrics);
+                 m.outcome = 'FAIL';
+                 console.log(`%c[DATA_COLLECTION] ${JSON.stringify(m)}`, 'background: #fee2e2; color: #991b1b; padding: 2px 4px; font-family: monospace;');
+             } catch (e) {}
+             btnEl.dataset.pendingMetrics = ''; // 防止重复打印
            }
            btnEl.dataset.rotationSolved = 'false'; // 允许重新开始扫描
         } else {
            // 元素不见了，说明通关了！
            console.log(`%c[CaptchaSolver] 🎉 经过 2.5 秒观察，验证码已消失，大概率已成功通过校验！`, 'color: #16a34a; font-size: 13px; font-weight: bold;');
-           if (btnEl.dataset.lastMetrics) {
-             const m = JSON.parse(btnEl.dataset.lastMetrics);
-             m.outcome = 'SUCCESS';
-             console.log(`%c[DATA_COLLECTION] ${JSON.stringify(m)}`, 'background: #dcfce7; color: #166534; padding: 2px 4px; font-family: monospace;');
-             btnEl.dataset.lastMetrics = '';
+           if (btnEl.dataset.pendingMetrics) {
+             try {
+                 const m = JSON.parse(btnEl.dataset.pendingMetrics);
+                 m.outcome = 'SUCCESS';
+                 console.log(`%c[DATA_COLLECTION] ${JSON.stringify(m)}`, 'background: #dcfce7; color: #166534; padding: 2px 4px; font-family: monospace;');
+             } catch (e) {}
+             btnEl.dataset.pendingMetrics = '';
            }
         }
       }, 2500);
