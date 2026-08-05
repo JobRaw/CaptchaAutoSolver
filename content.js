@@ -917,18 +917,18 @@
 
     // 图片加载状态校验：如果是 IMG 标签且尚未加载完毕，绑定 load 事件并在加载完毕后重新触发识别
     if (outerEl.tagName === 'IMG' && (!outerEl.complete || outerEl.naturalWidth === 0)) {
-      outerEl.addEventListener('load', () => debounce(scanAndSolveRotation, 500)(), { once: true });
+      outerEl.addEventListener('load', () => scanAndSolveRotation(), { once: true });
       return;
     }
     if (innerEl.tagName === 'IMG' && (!innerEl.complete || innerEl.naturalWidth === 0)) {
-      innerEl.addEventListener('load', () => debounce(scanAndSolveRotation, 500)(), { once: true });
+      innerEl.addEventListener('load', () => scanAndSolveRotation(), { once: true });
       return;
     }
 
     // 防抖与过渡动画等待：新图片出现后，强制等待至少 800ms，让 Loading 动画彻底消失
     const timeSinceNewSrc = now - parseInt(btnEl.dataset.rotationSrcTime || '0');
     if (timeSinceNewSrc < 800) {
-      setTimeout(() => debounce(scanAndSolveRotation, 500)(), 800 - timeSinceNewSrc);
+      setTimeout(() => scanAndSolveRotation(), 800 - timeSinceNewSrc);
       return; 
     }
 
