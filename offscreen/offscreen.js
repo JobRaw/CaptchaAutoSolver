@@ -875,7 +875,6 @@ async function detectRotationAngle(outerBase64, innerBase64, cx, cy, radius, inn
           bestV1Angle = i;
         }
       }
-      // 删除之前错误添加的 360 - offset 取反逻辑，保持原始极坐标匹配角度
       v1Result = { angle: bestV1Angle, score: bestV1Score };
     }
 
@@ -915,7 +914,6 @@ async function detectRotationAngle(outerBase64, innerBase64, cx, cy, radius, inn
           }
         }
       }
-      // 删除之前错误添加的 360 - offset 取反逻辑，保持原始极坐标匹配角度
       v2Result = { angle: bestV2Angle, score: bestV2Score };
     }
 
@@ -951,7 +949,6 @@ async function detectRotationAngle(outerBase64, innerBase64, cx, cy, radius, inn
           }
         }
       }
-      // 删除之前错误添加的 360 - offset 取反逻辑，保持原始极坐标匹配角度
       v3Result = { angle: bestV3Angle, score: bestV3Score };
     }
 
