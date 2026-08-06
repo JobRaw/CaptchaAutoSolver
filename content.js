@@ -266,10 +266,10 @@
           clearInterval(activePollTimer);
           activePollTimer = null;
         }
-      }, 200);
+      }, 1000);
     };
 
-    // 针对异步 HTTP 请求加载的验证码：在点击“获取验证码”等按钮时启动高频轮询探测（持续 3 秒，防抖单例）
+    // 针对异步 HTTP 请求加载的验证码：在点击“获取验证码”等按钮时启动轮询探测（每 1 秒一次，持续 15 秒保底）
     document.addEventListener('click', triggerHighFrequencyScan, true);
     document.addEventListener('touchstart', triggerHighFrequencyScan, true);
 
@@ -883,7 +883,11 @@
 
   // ==================== 旋转验证码：记忆与自适应学习系统 ====================
 
-  const OFFSET_EXPLORE_SEQUENCE = [0, 3, -3, 6, -6, 9, -9, 12, -12, 15, -15, 18, -18, 21, -21];
+  let OFFSET_EXPLORE_SEQUENCE = [0, 3, -3, 6, -6, 9, -9, 12, -12, 15, -15, 18, -18, 20, -20];
+
+  // 全局内存变量，解决 DOM 节点被销毁导致无法跨周期记录验证失败的问题
+  let pendingRotationMemoryTask = null;
+  let pendingRotationMetrics = null;
 
   // 轻量级 Base64 字符串归一化哈希生成器 (djb2 变体)
   function getStableImageHash(str) {
@@ -907,12 +911,15 @@
           const memory = res.rotationMemory || {};
           const record = memory[imgHash];
           if (!record) {
+            console.log(`%c[CaptchaSolver] [ADAPTIVE_MEMORY] 🧠【缓存读取】未找到该图片的历史自适应缓存，使用初始默认偏移 0° (Hash: ${imgHash})`, 'color: #6b7280;');
             resolve({ offset: 0, stateIndex: 0, isMemorized: false });
           } else if (typeof record.bestOffset === 'number') {
+            console.log(`%c[CaptchaSolver] [ADAPTIVE_MEMORY] 🧠【缓存读取 - 命中已锁定答案】成功读取已学习的最佳偏移量: ${record.bestOffset >= 0 ? '+' : ''}${record.bestOffset}° (Hash: ${imgHash})`, 'color: #059669; font-weight: bold;');
             resolve({ offset: record.bestOffset, stateIndex: record.stateIndex || 0, isMemorized: true });
           } else {
             const idx = record.stateIndex || 0;
             const offset = OFFSET_EXPLORE_SEQUENCE[idx] || 0;
+            console.log(`%c[CaptchaSolver] [ADAPTIVE_MEMORY] 🧠【缓存读取 - 探索模式】读取当前探索轮次 (第 ${idx + 1} 次尝试)，计算尝试偏移量: ${offset >= 0 ? '+' : ''}${offset}° (Hash: ${imgHash})`, 'color: #d97706; font-weight: bold;');
             resolve({ offset, stateIndex: idx, isMemorized: false });
           }
         });
@@ -941,21 +948,30 @@
         }
 
         if (isSuccess) {
+          // 验证通过，成功锁定最佳偏移量写入缓存
           memory[imgHash] = {
             bestOffset: appliedOffset,
             time: Date.now()
           };
-          console.log(`%c[CaptchaSolver] 🧠 成功匹配并记忆图片最佳偏移量: ${appliedOffset >= 0 ? '+' : ''}${appliedOffset}° (Hash: ${imgHash})`, 'color: #059669; font-weight: bold;');
+          console.log(`%c[CaptchaSolver] [ADAPTIVE_MEMORY] 🧠【缓存写入 - 锁定正确答案】验证成功！将最佳偏移量 (${appliedOffset >= 0 ? '+' : ''}${appliedOffset}°) 写入本地缓存 (Hash: ${imgHash})`, 'color: #059669; font-weight: bold;');
           console.log(`%c[DATA_COLLECTION] ${JSON.stringify({ hash: imgHash, bestOffset: appliedOffset, status: 'LEARNED' })}`, 'background: #fef9c3; color: #854d0e; padding: 2px 4px; font-family: monospace;');
         } else {
-          if (!memory[imgHash] || typeof memory[imgHash].bestOffset !== 'number') {
-            const nextIdx = currentStateIndex + 1;
+          // 验证失败
+          if (memory[imgHash] && memory[imgHash].manual) {
+            console.log(`%c[CaptchaSolver] [ADAPTIVE_MEMORY] 🧠【缓存保留】该记录为人工强行标注，本次失败不重置缓存设置 (Hash: ${imgHash})`, 'color: #d97706; font-weight: bold;');
+          } else {
+            let nextIdx = currentStateIndex + 1;
+            // 如果原本以为已经学对了 (有 bestOffset)，但实际上失败了，说明答案失效或算法误判，必须回退重新探索
+            if (memory[imgHash] && typeof memory[imgHash].bestOffset === 'number') {
+              console.log(`%c[CaptchaSolver] [ADAPTIVE_MEMORY] 🧠【缓存写入 - 标记失效回退】先前记忆的偏移量 (${memory[imgHash].bestOffset}°) 验证失败！自动清除错误答案，强制退回探索模式从第 2 索引开始重新尝试 (Hash: ${imgHash})`, 'color: #ef4444; font-weight: bold;');
+              nextIdx = 1;
+            }
             memory[imgHash] = {
               stateIndex: nextIdx,
               time: Date.now()
             };
             const nextOffset = OFFSET_EXPLORE_SEQUENCE[nextIdx] ?? '超出范围';
-            console.log(`%c[CaptchaSolver] 🧠 本次试探失败，下一次遇到该图将尝试新偏移量: ${nextOffset}° (Hash: ${imgHash})`, 'color: #d97706; font-weight: bold;');
+            console.log(`%c[CaptchaSolver] [ADAPTIVE_MEMORY] 🧠【缓存写入 - 推进探索】本次验证失败，写入更新探索状态: 下次遇到将尝试第 ${nextIdx + 1} 个探索偏移量 (${nextOffset}°) (Hash: ${imgHash})`, 'color: #d97706; font-weight: bold;');
             console.log(`%c[DATA_COLLECTION] ${JSON.stringify({ hash: imgHash, retryState: nextIdx, nextOffset: nextOffset, status: 'EXPLORING' })}`, 'background: #ffedd5; color: #c2410c; padding: 2px 4px; font-family: monospace;');
           }
         }
@@ -1031,14 +1047,28 @@
 
     // 只有经过了上面 800ms 的等待期、且图片确实加载完毕，才会到达这里。
     // 如果到达这里，说明我们正在对一张“全新”的图片发起真正的识别。
-    // 这时如果还有残留的 pendingMetrics，那它 100% 就是上一轮验证失败留下的。
-    if (btnEl.dataset.pendingMetrics) {
+    // 这时如果还有残留的 pendingRotationMetrics 或 pendingRotationMemoryTask，那它 100% 就是上一轮验证失败留下的。
+    if (pendingRotationMemoryTask) {
        try {
-           const m = JSON.parse(btnEl.dataset.pendingMetrics);
+           console.log(`%c[CaptchaSolver] [ADAPTIVE_MEMORY] ⚠️ 检测到上一轮拖拽后图片重新刷新，认定上轮验证失败，补记失败缓存...`, 'color: #dc2626; font-weight: bold;');
+           saveMemoryResult(
+             pendingRotationMemoryTask.hash, 
+             pendingRotationMemoryTask.offset, 
+             false, 
+             pendingRotationMemoryTask.stateIndex
+           );
+       } catch (e) {}
+       pendingRotationMemoryTask = null;
+    }
+
+    if (btnEl.dataset.pendingMetrics || pendingRotationMetrics) {
+       try {
+           const m = pendingRotationMetrics || JSON.parse(btnEl.dataset.pendingMetrics);
            m.outcome = 'FAIL';
            console.log(`%c[DATA_COLLECTION] ${JSON.stringify(m)}`, 'background: #fee2e2; color: #991b1b; padding: 2px 4px; font-family: monospace;');
        } catch (e) {}
        btnEl.dataset.pendingMetrics = '';
+       pendingRotationMetrics = null;
     }
 
     isRotationProcessing = true;
@@ -1104,12 +1134,18 @@
       }
 
       if (result) {
-        btnEl.dataset.pendingMetrics = JSON.stringify({
+        pendingRotationMetrics = {
             ...(result.metrics || {}),
             details: result.details || {},
             bestAngle: result.bestAngle,
             confidence: result.confidence
-        });
+        };
+        pendingRotationMemoryTask = {
+            hash: imgHash,
+            offset: appliedOffset,
+            stateIndex: memInfo.stateIndex || 0
+        };
+        btnEl.dataset.pendingMetrics = JSON.stringify(pendingRotationMetrics);
       }
 
       if (result && result.success && typeof result.bestAngle === 'number') {
@@ -1118,13 +1154,14 @@
         angleToUse = (rawBestAngle + appliedOffset + 360) % 360;
         
         if (memInfo.isMemorized) {
-          console.log(`%c[CaptchaSolver] 🧠 记忆系统生效！已命中该图片最佳偏移: ${appliedOffset >= 0 ? '+' : ''}${appliedOffset}° (原始计算: ${rawBestAngle}° -> 纠正后: ${angleToUse}°)`, 'color: #059669; font-weight: bold;');
+          console.log(`%c[CaptchaSolver] [ADAPTIVE_MEMORY] 🧠【自适应生效 - 命中锁定答案】原始计算角度: ${rawBestAngle}° | 加上记忆正确偏移量: ${appliedOffset >= 0 ? '+' : ''}${appliedOffset}° | 最终执行角度: ${angleToUse}° (Hash: ${imgHash})`, 'color: #059669; font-weight: bold;');
           console.log(`%c[DATA_COLLECTION] ${JSON.stringify({ hash: imgHash, action: 'APPLY_LEARNED', offset: appliedOffset, original: rawBestAngle, final: angleToUse })}`, 'background: #dcfce7; color: #166534; padding: 2px 4px; font-family: monospace;');
         } else if (appliedOffset !== 0) {
-          console.log(`%c[CaptchaSolver] 🧠 记忆系统试探中 (第 ${memInfo.stateIndex + 1} 次尝试)，应用偏移: ${appliedOffset >= 0 ? '+' : ''}${appliedOffset}° (原始计算: ${rawBestAngle}° -> 试探角: ${angleToUse}°)`, 'color: #d97706; font-weight: bold;');
+          console.log(`%c[CaptchaSolver] [ADAPTIVE_MEMORY] 🧠【自适应生效 - 试探偏移中】原始计算角度: ${rawBestAngle}° | 加上试探偏移量(第 ${memInfo.stateIndex + 1} 次尝试): ${appliedOffset >= 0 ? '+' : ''}${appliedOffset}° | 最终执行角度: ${angleToUse}° (Hash: ${imgHash})`, 'color: #d97706; font-weight: bold;');
           console.log(`%c[DATA_COLLECTION] ${JSON.stringify({ hash: imgHash, action: 'APPLY_EXPLORE', attempt: memInfo.stateIndex + 1, offset: appliedOffset, original: rawBestAngle, final: angleToUse })}`, 'background: #fef08a; color: #a16207; padding: 2px 4px; font-family: monospace;');
         } else {
-          // appliedOffset === 0 且没有命中记忆时，输出一个标准的初次查询日志
+          // appliedOffset === 0 且没有命中记忆时
+          console.log(`%c[CaptchaSolver] [ADAPTIVE_MEMORY] 🧠【自适应无偏移】原始计算角度: ${rawBestAngle}° | 偏移量: 0° | 最终执行角度: ${angleToUse}° (Hash: ${imgHash})`, 'color: #4b5563;');
           console.log(`%c[DATA_COLLECTION] ${JSON.stringify({ hash: imgHash, action: 'NO_RECORD', offset: 0, original: rawBestAngle, final: angleToUse })}`, 'background: #f3f4f6; color: #4b5563; padding: 2px 4px; font-family: monospace;');
         }
 
@@ -1199,34 +1236,42 @@
         // 校验 Session ID 防竞态错乱
         if (btnEl.dataset.solveSessionId !== currentSessionId) return;
 
+        // 如果全局任务已经被 failsafe 提前清理/重置（说明在新验证码加载时已认定上一轮失败），则放弃 timer 处理
+        if (!pendingRotationMemoryTask || pendingRotationMemoryTask.hash !== imgHash) {
+          return;
+        }
+
         // 如果 2.5 秒后元素依然存在且可见，说明没能把这个验证码消灭掉（服务器拦截了），说明失败了
         if (document.body.contains(btnEl) && isVisible(btnEl)) {
-           console.log(`%c[CaptchaSolver] ❌ 经过 2.5 秒观察，验证码依然存在，说明上一轮拖拽未通过服务器校验（验证失败）！`, 'color: #dc2626; font-size: 13px; font-weight: bold;');
+           console.log(`%c[CaptchaSolver] [ADAPTIVE_MEMORY] ❌【结果判定 - 验证失败】经过 2.5 秒观察，验证码依然存在，判定拖拽未通过服务器校验！(Hash: ${imgHash})`, 'color: #dc2626; font-size: 13px; font-weight: bold;');
            saveMemoryResult(imgHash, appliedOffset, false, memInfo.stateIndex);
 
-           if (btnEl.dataset.pendingMetrics) {
+           if (btnEl.dataset.pendingMetrics || pendingRotationMetrics) {
              try {
-                 const m = JSON.parse(btnEl.dataset.pendingMetrics);
+                 const m = pendingRotationMetrics || JSON.parse(btnEl.dataset.pendingMetrics);
                  m.outcome = 'FAIL';
                  console.log(`%c[DATA_COLLECTION] ${JSON.stringify(m)}`, 'background: #fee2e2; color: #991b1b; padding: 2px 4px; font-family: monospace;');
              } catch (e) {}
              btnEl.dataset.pendingMetrics = ''; // 防止重复打印
+             pendingRotationMetrics = null;
            }
            btnEl.dataset.rotationSolved = 'false'; // 允许重新开始扫描
         } else {
            // 元素不见了，说明通关了！
-           console.log(`%c[CaptchaSolver] 🎉 经过 2.5 秒观察，验证码已消失，大概率已成功通过校验！`, 'color: #16a34a; font-size: 13px; font-weight: bold;');
+           console.log(`%c[CaptchaSolver] [ADAPTIVE_MEMORY] 🎉【结果判定 - 验证成功】经过 2.5 秒观察，验证码 DOM 已消除，确认成功通过服务端校验！(Hash: ${imgHash})`, 'color: #16a34a; font-size: 13px; font-weight: bold;');
            saveMemoryResult(imgHash, appliedOffset, true, memInfo.stateIndex);
 
-           if (btnEl.dataset.pendingMetrics) {
+           if (btnEl.dataset.pendingMetrics || pendingRotationMetrics) {
              try {
-                 const m = JSON.parse(btnEl.dataset.pendingMetrics);
+                 const m = pendingRotationMetrics || JSON.parse(btnEl.dataset.pendingMetrics);
                  m.outcome = 'SUCCESS';
                  console.log(`%c[DATA_COLLECTION] ${JSON.stringify(m)}`, 'background: #dcfce7; color: #166534; padding: 2px 4px; font-family: monospace;');
              } catch (e) {}
              btnEl.dataset.pendingMetrics = '';
+             pendingRotationMetrics = null;
            }
         }
+        pendingRotationMemoryTask = null;
       }, 2500);
 
     } catch (err) {

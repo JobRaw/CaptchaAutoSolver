@@ -226,6 +226,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // 刷新按钮逻辑
+  const refreshBtn = document.getElementById('refreshMemoryBtn');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', () => {
+      loadMemoryData();
+      showToast('🔄 已刷新记忆数据');
+    });
+  }
+
   // 一键清空
   const clearAllBtn = document.getElementById('clearAllMemoryBtn');
   clearAllBtn.addEventListener('click', () => {

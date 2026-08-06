@@ -76,7 +76,10 @@
     <div class="form-card panel" id="memoryPanel">
       <div class="memory-header">
         <h3 class="section-title" style="margin: 0;">旋转验证码自适应记忆库</h3>
-        <button class="btn" id="clearAllMemoryBtn" style="background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); padding: 4px 12px; font-size: 13px;">清空全部记忆</button>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button class="btn" id="refreshMemoryBtn" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.35); padding: 4px 12px; font-size: 13px; cursor: pointer; transition: all 0.2s;">🔄 刷新数据</button>
+          <button class="btn" id="clearAllMemoryBtn" style="background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); padding: 4px 12px; font-size: 13px; cursor: pointer;">清空全部记忆</button>
+        </div>
       </div>
       <p class="help-text" style="margin-bottom: 15px;">此处记录了所有验证失败后经过自适应试探成功的图片及其最终纠正偏移量。您可以通过控制台找到 Hash Key 并在下方手动搜索修改。</p>
       
