@@ -312,20 +312,23 @@
   function bindElementObservers(imgEl, inputEl) {
     if (!imgEl.dataset.hasSolverObserver) {
       imgEl.dataset.hasSolverObserver = 'true';
-      console.log('[CaptchaSolver] 已锁定验证码图片:', imgEl);
+      
+      let srcChangeTimer = null;
+      new MutationObserver(() => {
+        if (srcChangeTimer) clearTimeout(srcChangeTimer);
+        srcChangeTimer = setTimeout(() => solveTarget(imgEl, inputEl), SRC_CHANGE_DEBOUNCE_MS);
+      }).observe(imgEl, { attributes: true, attributeFilter: ['src'] });
 
-      new MutationObserver(() =>
-        setTimeout(() => solveTarget(imgEl, inputEl), SRC_CHANGE_DEBOUNCE_MS)
-      ).observe(imgEl, { attributes: true, attributeFilter: ['src'] });
-
-      imgEl.addEventListener('click', () =>
-        setTimeout(() => solveTarget(imgEl, inputEl), CLICK_REFRESH_DEBOUNCE_MS)
-      );
+      let clickTimer = null;
+      imgEl.addEventListener('click', () => {
+        if (clickTimer) clearTimeout(clickTimer);
+        clickTimer = setTimeout(() => solveTarget(imgEl, inputEl), CLICK_REFRESH_DEBOUNCE_MS);
+      });
     }
 
     if (!inputEl.dataset.hasSolverObserver) {
       inputEl.dataset.hasSolverObserver = 'true';
-      console.log('[CaptchaSolver] 已锁定输入框:', inputEl);
+      
     }
   }
 
@@ -401,7 +404,7 @@
       const base64 = await getImageBase64(imgEl);
       if (!base64) throw new Error('图片跨域限制，无法读取验证码');
 
-      console.log('[CaptchaSolver] 图片已提取，正在发送到内置 OCR 引擎...');
+      
 
       // 发送至 Service Worker -> Offscreen 进行推理
       const data = await chrome.runtime.sendMessage({
@@ -785,7 +788,7 @@
         initialPieceLeft = Math.max(0, (pieceRect.left - bgRect.left) / scale);
       }
 
-      console.log('[CaptchaSolver] 滑动验证码图像已提取，正在分析缺口位置...');
+      
 
       // 发送到 Background -> Offscreen 进行缺口定位
       const result = await chrome.runtime.sendMessage({
@@ -1034,7 +1037,7 @@
   async function scanAndSolveRotation() {
     if (!isEnabled) return;
     if (isRotationProcessing) {
-      console.log('[CaptchaSolver] ⏳ 旋转验证码正在处理中，跳过本次重试');
+      
       return;
     }
 
@@ -1045,7 +1048,7 @@
       return;
     }
 
-    console.log('[CaptchaSolver] 🎯 成功捕获到旋转验证码 DOM 元素！', rotationElements);
+    
 
     const { outerEl, innerEl, btnEl, trackEl } = rotationElements;
 
@@ -1089,7 +1092,7 @@
     const outerReady = isRotationImageReady(outerEl);
     const innerReady = isRotationImageReady(innerEl);
     if (!outerReady || !innerReady) {
-      console.log(`[CaptchaSolver] ⚠️ 图片元素尚未完全准备就绪 (outerReady=${outerReady}, innerReady=${innerReady})，等待下一次轮询...`);
+      
       return;
     }
 
@@ -1121,7 +1124,7 @@
     }
 
     isRotationProcessing = true;
-    console.log('[CaptchaSolver] 🔄 开始进行旋转验证码破解流程...');
+    
     showNotice(btnEl, '🔄 正在识别旋转验证码...');
 
     try {
@@ -1148,7 +1151,7 @@
       const innerScaleX = innerData.width / innerRect.width;
       const innerRadius = Math.round((Math.min(innerRect.width, innerRect.height) / 2) * innerScaleX);
 
-      console.log(`[CaptchaSolver] 旋转验证码图像已提取，圆心(${cx}, ${cy}), 外部半径${radius}, 内部半径${innerRadius}`);
+      
 
       // 发送到 Background -> Offscreen 进行角度检测
       const result = await chrome.runtime.sendMessage({
@@ -1286,7 +1289,7 @@
       const rotateAngle = (360 - angleToUse) % 360;
       const dragDistance = Math.round((rotateAngle / 360) * dragRange);
 
-      console.log(`[CaptchaSolver] 匹配角度 ${angleToUse}° → 顺时针旋转角度 ${rotateAngle}° → 拖拽距离 ${dragDistance}px (轨道可用范围: ${dragRange}px)`);
+      
 
       // 执行模拟拖拽
       const dragSuccess = await simulateSliderDrag(btnEl, trackEl, dragDistance);
@@ -1516,7 +1519,7 @@
         }) || possibleBtns[0];
 
         if (btn) {
-          console.log('[CaptchaSolver] 🕵️‍♂️ 终极兜底扫描发现旋转验证码！', { bg, inner, btn });
+          
           return { outerEl: bg, innerEl: inner, btnEl: btn, trackEl: btn.parentElement };
         }
       }
