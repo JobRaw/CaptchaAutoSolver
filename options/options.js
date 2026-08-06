@@ -286,15 +286,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function updateCalibrationUI() {
     currentTargetAngle = (Math.round(currentTargetAngle) + 360) % 360;
-    rotationSlider.value = currentTargetAngle;
-    modalInnerImg.style.transform = `rotate(${currentTargetAngle}deg)`;
     
-    currentAngleText.textContent = `${currentTargetAngle}°`;
-    rawAngleText.textContent = `${currentRawAngle}°`;
-    targetAngleText.textContent = `${currentTargetAngle}°`;
+    // 界面统一使用真实的网页拖拽(顺时针)角度，消除与用户直觉的认知冲突
+    const displayTargetAngle = (360 - currentTargetAngle) % 360;
+    const displayRawAngle = (360 - currentRawAngle) % 360;
+    
+    rotationSlider.value = displayTargetAngle;
+    modalInnerImg.style.transform = `rotate(${displayTargetAngle}deg)`;
+    
+    currentAngleText.textContent = `${displayTargetAngle}° (顺时针拖拽角度)`;
+    rawAngleText.textContent = `${displayRawAngle}°`;
+    targetAngleText.textContent = `${displayTargetAngle}°`;
     
     const calculatedOffset = (currentTargetAngle - currentRawAngle + 540) % 360 - 180;
-    calculatedOffsetText.textContent = `${calculatedOffset >= 0 ? '+' : ''}${calculatedOffset}°`;
+    const displayOffset = (displayTargetAngle - displayRawAngle + 540) % 360 - 180;
+    
+    calculatedOffsetText.textContent = `${displayOffset >= 0 ? '+' : ''}${displayOffset}° (底层写入 ${calculatedOffset >= 0 ? '+' : ''}${calculatedOffset}°)`;
   }
 
   // 极坐标拖拽逻辑 (记录 mousedown 时的中心点，避免 mousemove 过程中因为旋转包围盒变化导致中心抖动)
@@ -312,7 +319,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!isDraggingInnerImg) return;
     const currentMouseAngle = Math.atan2(e.clientY - dragCenterY, e.clientX - dragCenterX) * (180 / Math.PI);
     let delta = currentMouseAngle - dragStartMouseAngle;
-    currentTargetAngle = (dragStartTargetAngle + delta + 360) % 360;
+    // 鼠标顺时针(正delta) -> 顺时针旋转角度增加 -> 相当于逆时针(底层)角度减少
+    currentTargetAngle = (dragStartTargetAngle - delta + 360) % 360;
     updateCalibrationUI();
   });
 
@@ -322,7 +330,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 滑块与微调
   rotationSlider.addEventListener('input', (e) => {
-    currentTargetAngle = parseFloat(e.target.value);
+    const displayAngle = parseFloat(e.target.value);
+    // 从展示的顺时针角度转换回底层的特征角度
+    currentTargetAngle = (360 - displayAngle) % 360;
     updateCalibrationUI();
   });
 
@@ -332,12 +342,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'ArrowLeft') {
       e.preventDefault();
       const step = e.shiftKey ? 5 : 1;
-      currentTargetAngle = (currentTargetAngle - step + 360) % 360;
+      // 左键：希望展示的角度(顺时针)减少，也就是逆时针角度增大
+      currentTargetAngle = (currentTargetAngle + step + 360) % 360;
       updateCalibrationUI();
     } else if (e.key === 'ArrowRight') {
       e.preventDefault();
       const step = e.shiftKey ? 5 : 1;
-      currentTargetAngle = (currentTargetAngle + step + 360) % 360;
+      // 右键：希望展示的角度(顺时针)增加，也就是逆时针角度减少
+      currentTargetAngle = (currentTargetAngle - step + 360) % 360;
       updateCalibrationUI();
     }
   });
