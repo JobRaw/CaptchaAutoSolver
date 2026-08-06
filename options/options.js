@@ -188,18 +188,210 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Action
       const tdAction = document.createElement('td');
+      
+      const calibrateBtn = document.createElement('button');
+      calibrateBtn.className = 'calibrate-btn';
+      calibrateBtn.textContent = '🎨 可视化校准';
+      calibrateBtn.onclick = () => {
+        openCalibrationModal(key, item);
+      };
+
       const saveActionBtn = document.createElement('button');
       saveActionBtn.className = 'action-btn';
       saveActionBtn.textContent = '保存修改';
       saveActionBtn.onclick = () => {
         saveSingleMemory(key, parseInt(offsetInput.value, 10));
       };
+
+      tdAction.appendChild(calibrateBtn);
       tdAction.appendChild(saveActionBtn);
       tr.appendChild(tdAction);
 
       tbody.appendChild(tr);
     });
   }
+
+  // ==================== 可视化旋转校准 Modal 交互逻辑 ====================
+  let currentCalibrateKey = null;
+  let currentRawAngle = 0;
+  let currentTargetAngle = 0;
+  let isDifferenceMode = false;
+  let isDraggingInnerImg = false;
+  let dragCenterX = 0;
+  let dragCenterY = 0;
+  let dragStartMouseAngle = 0;
+  let dragStartTargetAngle = 0;
+
+  const modal = document.getElementById('calibrationModal');
+  const modalCloseBtn = document.getElementById('modalCloseBtn');
+  const modalCancelBtn = document.getElementById('modalCancelBtn');
+  const modalSaveBtn = document.getElementById('modalSaveBtn');
+  const modalOuterImg = document.getElementById('modalOuterImg');
+  const modalInnerImg = document.getElementById('modalInnerImg');
+  const rotationSlider = document.getElementById('rotationSlider');
+  const currentAngleText = document.getElementById('currentAngleText');
+  const rawAngleText = document.getElementById('rawAngleText');
+  const targetAngleText = document.getElementById('targetAngleText');
+  const calculatedOffsetText = document.getElementById('calculatedOffsetText');
+  const toggleBlendBtn = document.getElementById('toggleBlendBtn');
+  const resetAngleBtn = document.getElementById('resetAngleBtn');
+
+  function openCalibrationModal(key, item) {
+    if (!item.outerImage || !item.innerImage) {
+      alert('⚠️ 该历史记录暂无图像缓存（可能是功能上线前生成的记录），无法开启可视化校准。您可以在表格中直接修改数字偏移量。');
+      return;
+    }
+
+    currentCalibrateKey = key;
+    currentRawAngle = typeof item.rawBestAngle === 'number' ? item.rawBestAngle : 0;
+    
+    // 默认初始目标角度 = 算法原始角度 + 当前偏移量
+    let initOffset = 0;
+    if (typeof item.bestOffset === 'number') {
+      initOffset = item.bestOffset;
+    } else {
+      const idx = item.stateIndex || 0;
+      initOffset = OFFSET_EXPLORE_SEQUENCE[idx] || 0;
+    }
+    currentTargetAngle = (currentRawAngle + initOffset + 360) % 360;
+
+    modalOuterImg.src = item.outerImage;
+    modalInnerImg.src = item.innerImage;
+
+    // 按照 cxRatio / cyRatio 以及 radiusRatio 动态定位及缩放中心图
+    const updateLayout = () => {
+      const w = modalOuterImg.clientWidth || 260;
+      const h = modalOuterImg.clientHeight || 130;
+      const cx = w * (item.cxRatio || 0.5);
+      const cy = h * (item.cyRatio || 0.5);
+      
+      // 统一固定校准中心圈比例为 0.25
+      const UNIFORM_RADIUS_RATIO = 0.25;
+      const innerW = w * UNIFORM_RADIUS_RATIO;
+      modalInnerImg.style.width = innerW + 'px';
+      modalInnerImg.style.height = innerW + 'px';
+      modalInnerImg.style.left = (cx - innerW / 2) + 'px';
+      modalInnerImg.style.top = (cy - innerW / 2 + 1) + 'px';
+    };
+
+    if (modalOuterImg.complete && modalOuterImg.naturalWidth !== 0) {
+      updateLayout();
+    } else {
+      modalOuterImg.onload = updateLayout;
+    }
+
+    updateCalibrationUI();
+    modal.style.display = 'flex';
+  }
+
+  function updateCalibrationUI() {
+    currentTargetAngle = (Math.round(currentTargetAngle) + 360) % 360;
+    rotationSlider.value = currentTargetAngle;
+    modalInnerImg.style.transform = `rotate(${currentTargetAngle}deg)`;
+    
+    currentAngleText.textContent = `${currentTargetAngle}°`;
+    rawAngleText.textContent = `${currentRawAngle}°`;
+    targetAngleText.textContent = `${currentTargetAngle}°`;
+    
+    const calculatedOffset = (currentTargetAngle - currentRawAngle + 540) % 360 - 180;
+    calculatedOffsetText.textContent = `${calculatedOffset >= 0 ? '+' : ''}${calculatedOffset}°`;
+  }
+
+  // 极坐标拖拽逻辑 (记录 mousedown 时的中心点，避免 mousemove 过程中因为旋转包围盒变化导致中心抖动)
+  modalInnerImg.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    isDraggingInnerImg = true;
+    const rect = modalInnerImg.getBoundingClientRect();
+    dragCenterX = rect.left + rect.width / 2;
+    dragCenterY = rect.top + rect.height / 2;
+    dragStartMouseAngle = Math.atan2(e.clientY - dragCenterY, e.clientX - dragCenterX) * (180 / Math.PI);
+    dragStartTargetAngle = currentTargetAngle;
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isDraggingInnerImg) return;
+    const currentMouseAngle = Math.atan2(e.clientY - dragCenterY, e.clientX - dragCenterX) * (180 / Math.PI);
+    let delta = currentMouseAngle - dragStartMouseAngle;
+    currentTargetAngle = (dragStartTargetAngle + delta + 360) % 360;
+    updateCalibrationUI();
+  });
+
+  window.addEventListener('mouseup', () => {
+    isDraggingInnerImg = false;
+  });
+
+  // 滑块与微调
+  rotationSlider.addEventListener('input', (e) => {
+    currentTargetAngle = parseFloat(e.target.value);
+    updateCalibrationUI();
+  });
+
+  // 键盘微调 (← / →)
+  window.addEventListener('keydown', (e) => {
+    if (modal.style.display !== 'flex') return;
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      const step = e.shiftKey ? 5 : 1;
+      currentTargetAngle = (currentTargetAngle - step + 360) % 360;
+      updateCalibrationUI();
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      const step = e.shiftKey ? 5 : 1;
+      currentTargetAngle = (currentTargetAngle + step + 360) % 360;
+      updateCalibrationUI();
+    }
+  });
+
+  // 差值对比模式切换
+  toggleBlendBtn.addEventListener('click', () => {
+    isDifferenceMode = !isDifferenceMode;
+    if (isDifferenceMode) {
+      modalInnerImg.classList.add('difference-mode');
+      toggleBlendBtn.textContent = '🌓 差值对比模式: 开';
+    } else {
+      modalInnerImg.classList.remove('difference-mode');
+      toggleBlendBtn.textContent = '🌓 差值对比模式: 关';
+    }
+  });
+
+  // 重置角度
+  resetAngleBtn.addEventListener('click', () => {
+    currentTargetAngle = currentRawAngle;
+    updateCalibrationUI();
+  });
+
+  // 关闭与取消
+  function closeModal() {
+    modal.style.display = 'none';
+    currentCalibrateKey = null;
+    isDraggingInnerImg = false;
+    if (isDifferenceMode) {
+      toggleBlendBtn.click();
+    }
+  }
+  modalCloseBtn.addEventListener('click', closeModal);
+  modalCancelBtn.addEventListener('click', closeModal);
+
+  // 确认保存
+  modalSaveBtn.addEventListener('click', () => {
+    if (!currentCalibrateKey) return;
+    const calculatedOffset = (currentTargetAngle - currentRawAngle + 540) % 360 - 180;
+    
+    if (!memoryData[currentCalibrateKey]) {
+      memoryData[currentCalibrateKey] = {};
+    }
+    memoryData[currentCalibrateKey].bestOffset = calculatedOffset;
+    memoryData[currentCalibrateKey].manual = true;
+    memoryData[currentCalibrateKey].time = Date.now();
+
+    if (chrome.storage?.local) {
+      chrome.storage.local.set({ rotationMemory: memoryData }, () => {
+        renderMemoryTable(searchInput.value);
+        showToast(`✅ 人工校准完成！已保存 ${currentCalibrateKey} 偏移量为 ${calculatedOffset >= 0 ? '+' : ''}${calculatedOffset}°`);
+        closeModal();
+      });
+    }
+  });
 
   searchInput.addEventListener('input', (e) => {
     renderMemoryTable(e.target.value);
@@ -213,7 +405,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // 更新内存中的对象，强制转换为已学习状态
     memoryData[key] = {
+      ...memoryData[key],
       bestOffset: offsetValue,
+      manual: true,
       time: Date.now()
     };
     

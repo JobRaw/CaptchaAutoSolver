@@ -904,6 +904,39 @@
     return 'img_' + Math.abs(hash).toString(36);
   }
 
+  /** 将 Base64 图像等比压缩缩放，降至指定最大宽度并转为 WebP (默认 300px, 0.75 质量) */
+  async function compressBase64Image(base64Str, maxWidth = 300) {
+    if (!base64Str || typeof base64Str !== 'string') return '';
+    return new Promise((resolve) => {
+      try {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            let width = img.naturalWidth || img.width || 300;
+            let height = img.naturalHeight || img.height || 300;
+            if (width > maxWidth) {
+              height = Math.round((height * maxWidth) / width);
+              width = maxWidth;
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+            const compressed = canvas.toDataURL('image/webp', 0.75);
+            resolve(compressed);
+          } catch (e) {
+            resolve(base64Str);
+          }
+        };
+        img.onerror = () => resolve(base64Str);
+        img.src = base64Str;
+      } catch (e) {
+        resolve(base64Str);
+      }
+    });
+  }
+
   async function getMemoryOffset(imgHash) {
     return new Promise((resolve) => {
       try {
@@ -929,13 +962,13 @@
     });
   }
 
-  async function saveMemoryResult(imgHash, appliedOffset, isSuccess, currentStateIndex) {
+  async function saveMemoryResult(imgHash, appliedOffset, isSuccess, currentStateIndex, extraData = null) {
     try {
       chrome.storage.local.get(['rotationMemory'], (res) => {
         let memory = res.rotationMemory || {};
         const keys = Object.keys(memory);
-        // 容量调控，超过 300 条自动淘汰最老的数据
-        if (keys.length > 300) {
+        // 容量调控，超过 200 条自动淘汰最老的数据
+        if (keys.length > 200) {
           let oldestKey = keys[0];
           let oldestTime = Infinity;
           for (const k of keys) {
@@ -947,10 +980,19 @@
           delete memory[oldestKey];
         }
 
+        const existingRecord = memory[imgHash] || {};
+
         if (isSuccess) {
           // 验证通过，成功锁定最佳偏移量写入缓存
           memory[imgHash] = {
             bestOffset: appliedOffset,
+            rawBestAngle: extraData?.rawBestAngle ?? existingRecord.rawBestAngle,
+            outerImage: extraData?.outerImage ?? existingRecord.outerImage,
+            innerImage: extraData?.innerImage ?? existingRecord.innerImage,
+            cxRatio: extraData?.cxRatio ?? existingRecord.cxRatio ?? 0.5,
+            cyRatio: extraData?.cyRatio ?? existingRecord.cyRatio ?? 0.5,
+            radiusRatio: extraData?.radiusRatio ?? existingRecord.radiusRatio,
+            manual: extraData?.manual ?? existingRecord.manual ?? false,
             time: Date.now()
           };
           console.log(`%c[CaptchaSolver] [ADAPTIVE_MEMORY] 🧠【缓存写入 - 锁定正确答案】验证成功！将最佳偏移量 (${appliedOffset >= 0 ? '+' : ''}${appliedOffset}°) 写入本地缓存 (Hash: ${imgHash})`, 'color: #059669; font-weight: bold;');
@@ -968,6 +1010,12 @@
             }
             memory[imgHash] = {
               stateIndex: nextIdx,
+              rawBestAngle: extraData?.rawBestAngle ?? existingRecord.rawBestAngle,
+              outerImage: extraData?.outerImage ?? existingRecord.outerImage,
+              innerImage: extraData?.innerImage ?? existingRecord.innerImage,
+              cxRatio: extraData?.cxRatio ?? existingRecord.cxRatio ?? 0.5,
+              cyRatio: extraData?.cyRatio ?? existingRecord.cyRatio ?? 0.5,
+              radiusRatio: extraData?.radiusRatio ?? existingRecord.radiusRatio,
               time: Date.now()
             };
             const nextOffset = OFFSET_EXPLORE_SEQUENCE[nextIdx] ?? '超出范围';
@@ -1055,7 +1103,8 @@
              pendingRotationMemoryTask.hash, 
              pendingRotationMemoryTask.offset, 
              false, 
-             pendingRotationMemoryTask.stateIndex
+             pendingRotationMemoryTask.stateIndex,
+             pendingRotationMemoryTask.extraData
            );
        } catch (e) {}
        pendingRotationMemoryTask = null;
@@ -1126,6 +1175,23 @@
       const memInfo = await getMemoryOffset(imgHash);
       const appliedOffset = memInfo.offset;
 
+      // 图像轻量 WebP 压缩，用于设置页面的可视化调试
+      const compressedOuter = await compressBase64Image(outerData.base64, 300);
+      const compressedInner = await compressBase64Image(innerData.base64, 150);
+      const cxRatio = outerData.width ? (cx / outerData.width) : 0.5;
+      const cyRatio = outerData.height ? (cy / outerData.height) : 0.5;
+
+      const radiusRatio = 0.25;
+
+      const extraData = {
+        rawBestAngle: result ? (result.bestAngle || 0) : 0,
+        outerImage: compressedOuter,
+        innerImage: compressedInner,
+        cxRatio: cxRatio,
+        cyRatio: cyRatio,
+        radiusRatio: radiusRatio
+      };
+
       if (result && result.debugLogs && Array.isArray(result.debugLogs)) {
         // 在前台 (网页 F12) 打印来自离屏后台的分析日志
         result.debugLogs.forEach(log => {
@@ -1143,7 +1209,8 @@
         pendingRotationMemoryTask = {
             hash: imgHash,
             offset: appliedOffset,
-            stateIndex: memInfo.stateIndex || 0
+            stateIndex: memInfo.stateIndex || 0,
+            extraData: extraData
         };
         btnEl.dataset.pendingMetrics = JSON.stringify(pendingRotationMetrics);
       }
@@ -1244,7 +1311,7 @@
         // 如果 2.5 秒后元素依然存在且可见，说明没能把这个验证码消灭掉（服务器拦截了），说明失败了
         if (document.body.contains(btnEl) && isVisible(btnEl)) {
            console.log(`%c[CaptchaSolver] [ADAPTIVE_MEMORY] ❌【结果判定 - 验证失败】经过 2.5 秒观察，验证码依然存在，判定拖拽未通过服务器校验！(Hash: ${imgHash})`, 'color: #dc2626; font-size: 13px; font-weight: bold;');
-           saveMemoryResult(imgHash, appliedOffset, false, memInfo.stateIndex);
+           saveMemoryResult(imgHash, appliedOffset, false, memInfo.stateIndex, extraData);
 
            if (btnEl.dataset.pendingMetrics || pendingRotationMetrics) {
              try {
@@ -1259,7 +1326,7 @@
         } else {
            // 元素不见了，说明通关了！
            console.log(`%c[CaptchaSolver] [ADAPTIVE_MEMORY] 🎉【结果判定 - 验证成功】经过 2.5 秒观察，验证码 DOM 已消除，确认成功通过服务端校验！(Hash: ${imgHash})`, 'color: #16a34a; font-size: 13px; font-weight: bold;');
-           saveMemoryResult(imgHash, appliedOffset, true, memInfo.stateIndex);
+           saveMemoryResult(imgHash, appliedOffset, true, memInfo.stateIndex, extraData);
 
            if (btnEl.dataset.pendingMetrics || pendingRotationMetrics) {
              try {

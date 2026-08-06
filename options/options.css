@@ -287,3 +287,142 @@ input:focus {
 .action-btn:hover {
   background: rgba(59, 130, 246, 0.4);
 }
+
+.calibrate-btn {
+  padding: 4px 8px;
+  font-size: 11px;
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 4px;
+  cursor: pointer;
+  margin-right: 4px;
+  transition: all 0.2s;
+}
+.calibrate-btn:hover {
+  background: rgba(16, 185, 129, 0.4);
+}
+
+/* Modal Backdrop & Card */
+.modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(8px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 999;
+}
+
+.modal-card {
+  width: 460px;
+  background: rgba(30, 41, 59, 0.95);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-title {
+  font-size: 15px;
+  color: #a5b4fc;
+  font-weight: 700;
+}
+
+.modal-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-sub);
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+/* Preview Canvas Container */
+.calibration-preview-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  min-height: 240px;
+  user-select: none;
+}
+
+.canvas-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.preview-outer-img {
+  display: block;
+  max-width: 260px;
+  height: auto;
+  border-radius: 8px;
+}
+
+.preview-inner-img {
+  position: absolute;
+  border-radius: 50%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  box-sizing: border-box;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.6);
+  cursor: grab;
+  user-select: none;
+  transform-origin: center center;
+  transition: transform 0.05s ease-out;
+}
+
+.preview-inner-img:active {
+  cursor: grabbing;
+}
+
+.preview-inner-img.difference-mode {
+  mix-blend-mode: difference;
+  filter: contrast(1.5);
+}
+
+/* Metrics Summary Card */
+.metrics-summary {
+  display: flex;
+  justify-content: space-between;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.metric-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.metric-label {
+  color: var(--text-sub);
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+.metric-val {
+  font-weight: 600;
+  color: var(--text-main);
+}

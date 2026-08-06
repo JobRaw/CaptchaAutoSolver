@@ -107,6 +107,60 @@
     </div>
   </div>
 
+  <!-- 可视化旋转校准 Modal 弹窗 -->
+  <div class="modal-backdrop" id="calibrationModal" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h4 class="modal-title">🎨 旋转验证码可视化校准</h4>
+        <button class="modal-close-btn" id="modalCloseBtn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="help-text" style="margin-bottom: 12px;">按住中心圆块即可鼠标旋转，或拖动底下滑块，使中心图与背景纹理拼合对齐：</p>
+        
+        <div class="calibration-preview-container">
+          <div class="canvas-wrapper" id="canvasWrapper">
+            <img id="modalOuterImg" class="preview-outer-img" src="" alt="背景图">
+            <img id="modalInnerImg" class="preview-inner-img" src="" alt="中心块">
+          </div>
+        </div>
+
+        <div class="calibration-controls">
+          <div class="control-row" style="margin-bottom: 10px; display: flex; gap: 8px;">
+            <button class="btn btn-secondary" id="toggleBlendBtn" style="padding: 4px 10px; font-size: 12px; cursor: pointer;">🌓 差值对比模式: 关</button>
+            <button class="btn btn-secondary" id="resetAngleBtn" style="padding: 4px 10px; font-size: 12px; cursor: pointer;">🔄 重置角度</button>
+          </div>
+          
+          <div class="slider-group" style="margin-bottom: 12px;">
+            <label for="rotationSlider" style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px;">
+              <span>旋转拼动角度: <strong id="currentAngleText" style="color: #60a5fa;">0°</strong></span>
+              <span style="color: #94a3b8; font-size: 11px;">键盘 ← / → 微调 1° (Shift 5°)</span>
+            </label>
+            <input type="range" id="rotationSlider" min="0" max="360" value="0" step="1" style="width: 100%; cursor: pointer;">
+          </div>
+
+          <div class="metrics-summary">
+            <div class="metric-item">
+              <span class="metric-label">算法预测角度:</span>
+              <span class="metric-val" id="rawAngleText">0°</span>
+            </div>
+            <div class="metric-item">
+              <span class="metric-label">目标拼合角度:</span>
+              <span class="metric-val" id="targetAngleText">0°</span>
+            </div>
+            <div class="metric-item highlight">
+              <span class="metric-label">计算得出 Offset:</span>
+              <span class="metric-val" id="calculatedOffsetText" style="color: #34d399; font-weight: bold;">0°</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+        <button class="btn btn-secondary" id="modalCancelBtn" style="cursor: pointer;">取消</button>
+        <button class="btn btn-primary" id="modalSaveBtn" style="cursor: pointer;">确认并写入缓存</button>
+      </div>
+    </div>
+  </div>
+
   <script src="options.js"></script>
 </body>
 </html>
