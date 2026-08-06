@@ -1355,51 +1355,87 @@
     const customInner = querySafe(customRotationInnerSel);
     const customBtn = querySafe(customRotationBtnSel);
 
-    let outerEl = null, innerEl = null, btnEl = null, trackEl = null;
+    let bestOuterEl = null, bestInnerEl = null, bestBtnEl = null, bestTrackEl = null;
 
-    // 查找外部背景图
-    if (customOuter && isVisible(customOuter)) {
-      outerEl = customOuter;
-    } else {
-      for (const sel of ROTATION_SELECTORS.outerImage) {
-        const el = querySafe(sel);
-        if (el && isVisible(el)) { outerEl = el; break; }
+    // 获取候选节点辅助函数
+    const getCandidates = (customEl, selectors) => {
+      if (customEl && isVisible(customEl)) return [customEl];
+      let candidates = [];
+      for (const sel of selectors) {
+        try {
+          const els = Array.from(document.querySelectorAll(sel)).filter(isVisible);
+          if (els.length > 0) candidates.push(...els);
+        } catch (e) {}
       }
-    }
+      return candidates;
+    };
 
-    // 查找圆形旋转内容图
-    if (customInner && isVisible(customInner)) {
-      innerEl = customInner;
-    } else {
-      for (const sel of ROTATION_SELECTORS.innerImage) {
-        const el = querySafe(sel);
-        if (el && isVisible(el)) { innerEl = el; break; }
-      }
-    }
+    const outerCandidates = getCandidates(customOuter, ROTATION_SELECTORS.outerImage);
+    const innerCandidates = getCandidates(customInner, ROTATION_SELECTORS.innerImage);
+    const btnCandidates = getCandidates(customBtn, ROTATION_SELECTORS.sliderBtn);
 
-    // 查找滑块按钮
-    if (customBtn && isVisible(customBtn)) {
-      btnEl = customBtn;
-    } else {
-      for (const sel of ROTATION_SELECTORS.sliderBtn) {
-        const el = querySafe(sel);
-        if (el && isVisible(el)) { btnEl = el; break; }
-      }
-    }
-
-    // 三个元素都找到（如果是特定的高置信度选择器，不再强制要求物理形状是圆形）
-    if (outerEl && innerEl && btnEl) {
-      const innerRect = innerEl.getBoundingClientRect();
+    // 寻找合法组合：防止不同验证码实例的元素被错误拼凑（张冠李戴）
+    let foundCombination = false;
+    for (const outerEl of outerCandidates) {
+      if (foundCombination) break;
       const outerRect = outerEl.getBoundingClientRect();
-      // 只要尺寸不过于离谱（比如大于 10px 且包含在验证码通用尺寸内），或者通过了圆形测试
-      if ((innerRect.width >= 20 && innerRect.height >= 20 && outerRect.width >= 100) || isElementCircular(innerEl)) {
-        for (const sel of ROTATION_SELECTORS.track) {
-          const el = querySafe(sel);
-          if (el && isVisible(el)) { trackEl = el; break; }
+      
+      for (const innerEl of innerCandidates) {
+        if (foundCombination) break;
+        const innerRect = innerEl.getBoundingClientRect();
+        
+        // 校验 1：内图的中心必须落在这个外图的矩形范围内
+        const innerCX = innerRect.left + innerRect.width / 2;
+        const innerCY = innerRect.top + innerRect.height / 2;
+        const isContained = (
+          innerCX >= outerRect.left && innerCX <= outerRect.right &&
+          innerCY >= outerRect.top && innerCY <= outerRect.bottom
+        );
+        if (!isContained) continue;
+
+        for (const btnEl of btnCandidates) {
+          // 校验 2：拖动按钮应该跟外图属于同一个较近的容器上下文 (向上寻找最近 12 级)
+          let commonAncestor = outerEl.parentElement;
+          let sharedContext = false;
+          let depth = 0;
+          while (commonAncestor && commonAncestor !== document.body && depth < 12) {
+            if (commonAncestor.contains(btnEl)) {
+              sharedContext = true;
+              break;
+            }
+            commonAncestor = commonAncestor.parentElement;
+            depth++;
+          }
+          
+          // 若通过了容器约束（或者页面上只有唯一的一个按钮候选）
+          if (sharedContext || btnCandidates.length === 1) {
+            // 原有的置信度及大小过滤
+            if ((innerRect.width >= 20 && innerRect.height >= 20 && outerRect.width >= 100) || isElementCircular(innerEl)) {
+              bestOuterEl = outerEl;
+              bestInnerEl = innerEl;
+              bestBtnEl = btnEl;
+              
+              // 寻找轨道
+              for (const sel of ROTATION_SELECTORS.track) {
+                try {
+                  const els = Array.from(document.querySelectorAll(sel)).filter(isVisible);
+                  // 轨道也必须在共同容器内
+                  const validTrack = els.find(t => !commonAncestor || commonAncestor.contains(t) || t.contains(bestBtnEl));
+                  if (validTrack) { bestTrackEl = validTrack; break; }
+                } catch(e) {}
+              }
+              if (!bestTrackEl) bestTrackEl = bestBtnEl.parentElement;
+              
+              foundCombination = true;
+              break;
+            }
+          }
         }
-        if (!trackEl) trackEl = btnEl.parentElement;
-        return { outerEl, innerEl, btnEl, trackEl };
       }
+    }
+
+    if (foundCombination && bestOuterEl && bestInnerEl && bestBtnEl && bestTrackEl) {
+      return { outerEl: bestOuterEl, innerEl: bestInnerEl, btnEl: bestBtnEl, trackEl: bestTrackEl };
     }
 
     // ==================== 智能语义/结构退化探测 ====================
