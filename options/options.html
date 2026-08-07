@@ -15,6 +15,7 @@
 
     <div class="tabs">
       <div class="tab active" data-target="rulesPanel">⚙️ 匹配规则配置</div>
+      <div class="tab" data-target="whitelistPanel">🌐 域名白名单管理</div>
       <div class="tab" data-target="memoryPanel">🧠 自适应记忆管理</div>
     </div>
 
@@ -69,6 +70,34 @@
         <button class="btn btn-primary" id="saveBtn">保存配置</button>
         <button class="btn btn-secondary" id="resetBtn">恢复默认</button>
         <span class="save-toast" id="toast">✅ 保存成功！已同步应用</span>
+      </div>
+    </div>
+
+    <!-- 域名白名单面板 -->
+    <div class="form-card panel" id="whitelistPanel">
+      <div class="memory-header">
+        <h3 class="section-title" style="margin: 0;">🌐 域名白名单管理</h3>
+      </div>
+      <p class="help-text" style="margin-bottom: 15px;">此处管理的域名会生效自动识别功能。如果列表为空，则任何网站都不会自动识别。</p>
+      
+      <div class="form-group" style="display: flex; gap: 8px;">
+        <input type="text" id="newDomainInput" placeholder="输入纯域名 (例如: testai.gzjyh.com)" style="flex: 1;">
+        <button class="btn btn-primary" id="addWhitelistBtn" style="white-space: nowrap;">➕ 添加</button>
+      </div>
+
+      <div class="memory-list-container">
+        <table class="memory-table">
+          <thead>
+            <tr>
+              <th>域名 (Domain)</th>
+              <th style="width: 80px;">操作</th>
+            </tr>
+          </thead>
+          <tbody id="whitelistTableBody">
+            <!-- JS 渲染内容 -->
+          </tbody>
+        </table>
+        <div id="whitelistEmptyState" style="display: none; text-align: center; padding: 40px; color: #6b7280; font-size: 14px;">白名单为空，自动识别功能暂不生效</div>
       </div>
     </div>
 

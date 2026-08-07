@@ -97,9 +97,90 @@ document.addEventListener('DOMContentLoaded', () => {
       // 如果切换到记忆管理，则加载数据
       if (tab.dataset.target === 'memoryPanel') {
         loadMemoryData();
+      } else if (tab.dataset.target === 'whitelistPanel') {
+        loadWhitelistData();
       }
     });
   });
+
+  // ==================== 域名白名单管理逻辑 ====================
+  const newDomainInput = document.getElementById('newDomainInput');
+  const addWhitelistBtn = document.getElementById('addWhitelistBtn');
+  const whitelistTableBody = document.getElementById('whitelistTableBody');
+  const whitelistEmptyState = document.getElementById('whitelistEmptyState');
+
+  function loadWhitelistData() {
+    if (!chrome.storage?.sync) return;
+    chrome.storage.sync.get(['domainWhitelist'], (res) => {
+      const whitelist = res.domainWhitelist || [];
+      renderWhitelistTable(whitelist);
+    });
+  }
+
+  function renderWhitelistTable(whitelist) {
+    whitelistTableBody.innerHTML = '';
+    
+    if (whitelist.length === 0) {
+      whitelistTableBody.parentElement.style.display = 'none';
+      whitelistEmptyState.style.display = 'block';
+      return;
+    }
+
+    whitelistTableBody.parentElement.style.display = 'table';
+    whitelistEmptyState.style.display = 'none';
+
+    whitelist.forEach((domain, index) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="font-family: monospace; font-size: 14px; color: #e2e8f0;">${domain}</td>
+        <td>
+          <button class="btn delete-btn" data-index="${index}" style="background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); padding: 4px 8px; font-size: 12px; cursor: pointer; border-radius: 4px;">删除</button>
+        </td>
+      `;
+      whitelistTableBody.appendChild(tr);
+    });
+
+    // 绑定删除事件
+    document.querySelectorAll('.delete-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const idx = parseInt(e.target.dataset.index, 10);
+        whitelist.splice(idx, 1);
+        chrome.storage.sync.set({ domainWhitelist: whitelist }, () => {
+          showToast('✅ 域名已移除');
+          renderWhitelistTable(whitelist);
+        });
+      });
+    });
+  }
+
+  if (addWhitelistBtn && newDomainInput) {
+    addWhitelistBtn.addEventListener('click', () => {
+      let domain = newDomainInput.value.trim();
+      if (!domain) {
+        showToast('⚠️ 请输入域名');
+        return;
+      }
+      
+      // 去除 http/https 前缀
+      domain = domain.replace(/^https?:\/\//i, '');
+      // 去除路径和参数
+      domain = domain.split('/')[0];
+
+      chrome.storage.sync.get(['domainWhitelist'], (res) => {
+        const whitelist = res.domainWhitelist || [];
+        if (whitelist.includes(domain)) {
+          showToast('⚠️ 域名已存在白名单中');
+          return;
+        }
+        whitelist.push(domain);
+        chrome.storage.sync.set({ domainWhitelist: whitelist }, () => {
+          showToast('✅ 域名添加成功');
+          newDomainInput.value = '';
+          renderWhitelistTable(whitelist);
+        });
+      });
+    });
+  }
 
   // 如果 URL hash 指定了记忆面板，自动切换过去
   if (window.location.hash === '#memory') {

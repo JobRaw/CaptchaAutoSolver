@@ -11,7 +11,8 @@
   "permissions": [
     "storage",
     "offscreen",
-    "alarms"
+    "alarms",
+    "activeTab"
   ],
   "action": {
     "default_popup": "popup/popup.html",

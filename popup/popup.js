@@ -72,4 +72,62 @@ document.addEventListener('DOMContentLoaded', () => {
       statusText.innerText = "自动识别助手已暂停";
     }
   }
+
+  // 一键添加域名逻辑
+  const addDomainBtn = document.getElementById('addDomainBtn');
+  const currentDomainText = document.getElementById('currentDomainText');
+  let currentDomain = '';
+
+  if (chrome.tabs && addDomainBtn && currentDomainText) {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs && tabs.length > 0 && tabs[0].url) {
+        try {
+          const url = new URL(tabs[0].url);
+          currentDomain = url.hostname;
+          if (!currentDomain) throw new Error('No hostname');
+          
+          if (chrome.storage?.sync) {
+            chrome.storage.sync.get(['domainWhitelist'], (res) => {
+              const whitelist = res.domainWhitelist || [];
+              if (whitelist.includes(currentDomain)) {
+                currentDomainText.innerText = `当前: ${currentDomain} (已在白名单)`;
+                currentDomainText.style.color = '#34d399';
+                addDomainBtn.style.opacity = '0.5';
+                addDomainBtn.style.cursor = 'not-allowed';
+                addDomainBtn.disabled = true;
+              } else {
+                currentDomainText.innerText = `当前: ${currentDomain} (未加入)`;
+              }
+            });
+          }
+        } catch (e) {
+          currentDomainText.innerText = '无法获取当前页面域名';
+          addDomainBtn.style.display = 'none';
+        }
+      } else {
+        currentDomainText.innerText = '无法读取此页面的链接(可能是系统页)';
+        addDomainBtn.style.display = 'none';
+      }
+    });
+
+    addDomainBtn.addEventListener('click', () => {
+      if (!currentDomain || addDomainBtn.disabled) return;
+      if (chrome.storage?.sync) {
+        chrome.storage.sync.get(['domainWhitelist'], (res) => {
+          let whitelist = res.domainWhitelist || [];
+          if (!whitelist.includes(currentDomain)) {
+            whitelist.push(currentDomain);
+            chrome.storage.sync.set({ domainWhitelist: whitelist }, () => {
+              currentDomainText.innerText = `当前: ${currentDomain} (已加入)`;
+              currentDomainText.style.color = '#34d399';
+              addDomainBtn.innerText = '✅ 已添加';
+              addDomainBtn.style.opacity = '0.5';
+              addDomainBtn.style.cursor = 'not-allowed';
+              addDomainBtn.disabled = true;
+            });
+          }
+        });
+      }
+    });
+  }
 });

@@ -1722,5 +1722,20 @@
   }
 
   // 确保在所有变量声明后执行
-  init();
+  if (chrome.storage?.sync) {
+    chrome.storage.sync.get(['domainWhitelist'], (res) => {
+      const whitelist = res.domainWhitelist || [];
+      const currentDomain = window.location.hostname;
+      
+      // 只有当前域名在白名单中时，才初始化扩展
+      if (whitelist.length > 0 && whitelist.includes(currentDomain)) {
+        init();
+      } else {
+        console.log(`[CaptchaSolver] 当前域名 ${currentDomain} 不在白名单中，自动识别已禁用。`);
+      }
+    });
+  } else {
+    // 兼容可能没有 storage 的环境，保守处理不启动，或者默认启动（这里选择不启动，因为用户要求列表为空不运行）
+    console.warn('[CaptchaSolver] 无法访问 chrome.storage API');
+  }
 })();
