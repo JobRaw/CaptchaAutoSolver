@@ -45,13 +45,19 @@
         <span style="font-size: 13px; color: #fbbf24;">开启全数据收集(打出详细日志)</span>
         <label class="switch"><input type="checkbox" id="toggleCollect" checked><span class="slider"></span></label>
       </div>
-      <div class="control-row" style="margin-top: 12px; justify-content: center;">
+      <div class="control-row" style="margin-top: 12px; justify-content: center; margin-bottom: 0;">
         <button id="openMemoryBtn" style="width: 100%; padding: 6px; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.5); color: #93c5fd; border-radius: 4px; cursor: pointer; font-size: 13px; transition: all 0.2s;">🧠 查看 / 管理图像记忆库</button>
       </div>
-      <div class="control-row" style="margin-top: 8px; justify-content: center; flex-direction: column; gap: 4px; align-items: stretch;">
-        <button id="addDomainBtn" style="width: 100%; padding: 6px; background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.5); color: #6ee7b7; border-radius: 4px; cursor: pointer; font-size: 13px; transition: all 0.2s;">➕ 一键添加当前域名至白名单</button>
-        <span id="currentDomainText" style="font-size: 11px; color: #94a3b8; text-align: center;">...</span>
+    </div>
+
+    <!-- 域名白名单控制卡片 -->
+    <div class="domain-card">
+      <div class="domain-header">
+        <span class="domain-label">🌐 当前页面网址</span>
+        <span id="domainBadge" class="domain-badge badge-warning">检测中...</span>
       </div>
+      <div id="currentDomainText" class="domain-url" title="...">读取中...</div>
+      <button id="addDomainBtn" class="btn btn-add">➕ 添加当前页面至白名单</button>
     </div>
 
     <div class="footer">

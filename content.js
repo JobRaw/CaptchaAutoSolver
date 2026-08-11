@@ -1721,17 +1721,27 @@
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  function getCleanUrl(rawUrl) {
+    try {
+      const u = new URL(rawUrl);
+      const cleanHash = u.hash ? u.hash.split('?')[0] : '';
+      return u.origin + u.pathname + cleanHash;
+    } catch (e) {
+      return rawUrl.split('?')[0];
+    }
+  }
+
   // 确保在所有变量声明后执行
   if (chrome.storage?.sync) {
     chrome.storage.sync.get(['domainWhitelist'], (res) => {
       const whitelist = res.domainWhitelist || [];
-      const currentDomain = window.location.hostname;
+      const currentDomain = getCleanUrl(window.location.href);
       
-      // 只有当前域名在白名单中时，才初始化扩展
+      // 只有当前页面全路径在白名单中时，才初始化扩展
       if (whitelist.length > 0 && whitelist.includes(currentDomain)) {
         init();
       } else {
-        console.log(`[CaptchaSolver] 当前域名 ${currentDomain} 不在白名单中，自动识别已禁用。`);
+        console.log(`[CaptchaSolver] 当前页面 ${currentDomain} 不在白名单中，自动识别已禁用。`);
       }
     });
   } else {

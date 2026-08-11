@@ -76,36 +76,63 @@ document.addEventListener('DOMContentLoaded', () => {
   // 一键添加域名逻辑
   const addDomainBtn = document.getElementById('addDomainBtn');
   const currentDomainText = document.getElementById('currentDomainText');
+  const domainBadge = document.getElementById('domainBadge');
   let currentDomain = '';
+
+  function getCleanUrl(rawUrl) {
+    try {
+      const u = new URL(rawUrl);
+      const cleanHash = u.hash ? u.hash.split('?')[0] : '';
+      return u.origin + u.pathname + cleanHash;
+    } catch (e) {
+      return '';
+    }
+  }
 
   if (chrome.tabs && addDomainBtn && currentDomainText) {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs && tabs.length > 0 && tabs[0].url) {
         try {
-          const url = new URL(tabs[0].url);
-          currentDomain = url.hostname;
-          if (!currentDomain) throw new Error('No hostname');
+          currentDomain = getCleanUrl(tabs[0].url);
+          if (!currentDomain) throw new Error('No valid URL');
           
+          currentDomainText.innerText = currentDomain;
+          currentDomainText.title = currentDomain;
+
           if (chrome.storage?.sync) {
             chrome.storage.sync.get(['domainWhitelist'], (res) => {
               const whitelist = res.domainWhitelist || [];
               if (whitelist.includes(currentDomain)) {
-                currentDomainText.innerText = `当前: ${currentDomain} (已在白名单)`;
-                currentDomainText.style.color = '#34d399';
-                addDomainBtn.style.opacity = '0.5';
-                addDomainBtn.style.cursor = 'not-allowed';
+                if (domainBadge) {
+                  domainBadge.innerText = '已在白名单';
+                  domainBadge.className = 'domain-badge badge-success';
+                }
+                addDomainBtn.innerText = '✅ 已在白名单';
                 addDomainBtn.disabled = true;
               } else {
-                currentDomainText.innerText = `当前: ${currentDomain} (未加入)`;
+                if (domainBadge) {
+                  domainBadge.innerText = '未加入';
+                  domainBadge.className = 'domain-badge badge-warning';
+                }
+                addDomainBtn.innerText = '➕ 添加当前页面至白名单';
+                addDomainBtn.disabled = false;
               }
             });
           }
         } catch (e) {
-          currentDomainText.innerText = '无法获取当前页面域名';
+          currentDomainText.innerText = '无法获取当前页面地址';
+          if (domainBadge) {
+            domainBadge.innerText = '获取失败';
+            domainBadge.className = 'domain-badge badge-gray';
+          }
           addDomainBtn.style.display = 'none';
         }
       } else {
-        currentDomainText.innerText = '无法读取此页面的链接(可能是系统页)';
+        currentDomainText.innerText = '系统/特殊页面不支持识别';
+        if (domainBadge) {
+          domainBadge.innerText = '无法访问';
+          domainBadge.className = 'domain-badge badge-gray';
+        }
         addDomainBtn.style.display = 'none';
       }
     });
@@ -118,11 +145,11 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!whitelist.includes(currentDomain)) {
             whitelist.push(currentDomain);
             chrome.storage.sync.set({ domainWhitelist: whitelist }, () => {
-              currentDomainText.innerText = `当前: ${currentDomain} (已加入)`;
-              currentDomainText.style.color = '#34d399';
-              addDomainBtn.innerText = '✅ 已添加';
-              addDomainBtn.style.opacity = '0.5';
-              addDomainBtn.style.cursor = 'not-allowed';
+              if (domainBadge) {
+                domainBadge.innerText = '已在白名单';
+                domainBadge.className = 'domain-badge badge-success';
+              }
+              addDomainBtn.innerText = '✅ 已成功添加';
               addDomainBtn.disabled = true;
             });
           }

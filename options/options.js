@@ -161,10 +161,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
       
-      // 去除 http/https 前缀
-      domain = domain.replace(/^https?:\/\//i, '');
-      // 去除路径和参数
-      domain = domain.split('/')[0];
+      // 保留哈希路由路径，仅去除查询参数 (search params)
+      try {
+        const urlStr = domain.startsWith('http') ? domain : 'http://' + domain;
+        const url = new URL(urlStr);
+        const cleanHash = url.hash ? url.hash.split('?')[0] : '';
+        domain = url.origin + url.pathname + cleanHash;
+      } catch(e) {
+        domain = domain.split('?')[0];
+      }
 
       chrome.storage.sync.get(['domainWhitelist'], (res) => {
         const whitelist = res.domainWhitelist || [];
