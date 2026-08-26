@@ -50,16 +50,18 @@ async function ensureOffscreenDocument() {
     return;
   }
 
-  offscreenCreating = chrome.offscreen.createDocument({
-    url: OFFSCREEN_DOCUMENT_PATH,
-    reasons: ['DOM_PARSER'],
-    justification: '使用 Canvas 预处理验证码图片，并通过 ONNX Runtime WASM 运行 OCR 模型推理'
-  });
+  try {
+    offscreenCreating = chrome.offscreen.createDocument({
+      url: OFFSCREEN_DOCUMENT_PATH,
+      reasons: ['DOM_PARSER'],
+      justification: '使用 Canvas 预处理验证码图片，并通过 ONNX Runtime WASM 运行 OCR 模型推理'
+    });
 
-  await offscreenCreating;
-  offscreenCreating = null;
-
-  console.log('[Background] Offscreen document 已创建');
+    await offscreenCreating;
+    console.log('[Background] Offscreen document 已创建');
+  } finally {
+    offscreenCreating = null;
+  }
 }
 
 // ==================== 消息路由 ====================
@@ -181,6 +183,9 @@ async function handleRotationRequest(message, sender) {
 async function handleFetchImageRequest(url) {
   try {
     const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`HTTP 请求失败: ${res.status} ${res.statusText}`);
+    }
     const blob = await res.blob();
     return new Promise((resolve, reject) => {
       const reader = new FileReader();

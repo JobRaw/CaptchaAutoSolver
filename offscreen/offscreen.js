@@ -68,7 +68,7 @@ async function initOCR() {
  */
 async function preprocessImage(base64Str) {
   const img = await loadImage(base64Str);
-  const canvas = document.getElementById('preprocess-canvas');
+  const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
   // 计算等比缩放尺寸（高度固定为 64）
@@ -99,12 +99,23 @@ async function preprocessImage(base64Str) {
   return new ort.Tensor('float32', tensorData, [1, 1, newH, newW]);
 }
 
-/** 从 Base64 字符串加载图片 */
-function loadImage(base64Str) {
+/** 从 Base64 字符串加载图片，附带 5000ms 超时保护 */
+function loadImage(base64Str, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('图片加载失败'));
+    const timer = setTimeout(() => {
+      img.src = '';
+      reject(new Error('图片加载超时'));
+    }, timeoutMs);
+
+    img.onload = () => {
+      clearTimeout(timer);
+      resolve(img);
+    };
+    img.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error('图片加载失败'));
+    };
     img.src = base64Str;
   });
 }
@@ -167,7 +178,8 @@ async function recognize(base64Image, rangeType = 6) {
     const inputTensor = await preprocessImage(base64Image);
 
     // 运行推理
-    const feeds = { 'input1': inputTensor };
+    const inputName = (ortSession.inputNames && ortSession.inputNames[0]) || 'input1';
+    const feeds = { [inputName]: inputTensor };
     const results = await ortSession.run(feeds);
 
     // 获取输出（输出名称从模型动态获取）
@@ -343,7 +355,7 @@ function cropTransparent(imageData) {
  * @returns {{success: boolean, targetX: number, startX: number, offsetX: number, confidence: number}}
  */
 function templateMatchByEdge(bgImg, pieceImg, initialLeft = 0) {
-  const canvas = document.getElementById('preprocess-canvas');
+  const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   
   canvas.width = bgImg.width;
@@ -475,7 +487,7 @@ function templateMatchByEdge(bgImg, pieceImg, initialLeft = 0) {
  * @returns {{success: boolean, targetX: number, startX: number, offsetX: number, confidence: number}}
  */
 function shadowRegionDetect(bgImg, startX = 0) {
-  const canvas = document.getElementById('preprocess-canvas');
+  const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   
   canvas.width = bgImg.width;
@@ -581,7 +593,6 @@ async function detectSliderGap(bgBase64, pieceBase64, initialLeft = 0) {
 
 function extractColorPolarRows(imageData, cx, cy, radius, bandWidth, sampleCount, ignoreBlackHole) {
   const { data, width, height } = imageData;
-  const numRadii = bandWidth * 2 + 1;
   const rows = [];
 
   for (let dr = -bandWidth; dr <= bandWidth; dr++) {
@@ -730,7 +741,6 @@ function polarBandZNCC(outerBand, innerBand, numAngles, numRadii, shiftAngles) {
 
 function extractPolarRows(imageData, cx, cy, radius, bandWidth, sampleCount) {
   const { data, width, height } = imageData;
-  const numRadii = bandWidth * 2 + 1;
   const rows = [];
 
   for (let dr = -bandWidth; dr <= bandWidth; dr++) {
@@ -811,7 +821,7 @@ function zncc1D(rowO, rowI, sampleCount, shift) {
 
 async function detectRotationAngle(outerBase64, innerBase64, cx, cy, radius, innerRadius, algoOptions = {}) {
   try {
-    const canvas = document.getElementById("preprocess-canvas");
+    const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
     const outerImg = await loadImage(outerBase64);
@@ -1065,6 +1075,8 @@ async function detectRotationAngle(outerBase64, innerBase64, cx, cy, radius, inn
   } catch (err) {
     console.error("[OCR Offscreen] detectRotationAngle error:", err);
     return { success: false, bestAngle: 0, confidence: 0, error: err.message };
+  } finally {
+    resetCanvas();
   }
 }
 

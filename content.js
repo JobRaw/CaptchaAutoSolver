@@ -145,8 +145,10 @@
 
   // ==================== 运行时状态 ====================
 
+  let isInitialized = false;
   let isProcessing = false;
   let isEnabled = true;
+  let cachedWhitelist = [];
   let customImgSel = '';
   let customInputSel = '';
   let isSliderProcessing = false;
@@ -161,9 +163,25 @@
   let algoV3Enabled = true;
   let dataCollectEnabled = true;
 
+  let scanTimer = null;
+  let activePollTimer = null;
+
+  /** 统一防抖触发三大验证码识别引擎 */
+  function triggerScan() {
+    if (!isEnabled || !isCurrentUrlAllowed()) return;
+    if (scanTimer) clearTimeout(scanTimer);
+    scanTimer = setTimeout(() => {
+      scanAndSolve();
+      scanAndSolveSlider();
+      scanAndSolveRotation();
+    }, MUTATION_DEBOUNCE_MS);
+  }
+
   // ==================== 入口 ====================
 
   function init() {
+    if (isInitialized) return;
+    isInitialized = true;
     console.log(
       '%c[CaptchaSolver]%c 🚀 验证码自动识别扩展已启动并注入页面！',
       'color: #10b981; font-weight: bold;', 'color: auto;'
@@ -214,19 +232,7 @@
 
   /** 启动防抖的 DOM 变动监听与交互监听 */
   function startObserving() {
-    let scanTimer = null;
-    const triggerScan = () => {
-      if (scanTimer) clearTimeout(scanTimer);
-      scanTimer = setTimeout(() => {
-        scanAndSolve();
-        scanAndSolveSlider();
-        scanAndSolveRotation();
-      }, MUTATION_DEBOUNCE_MS);
-    };
-
-    scanAndSolve(); // 初始扫描
-    scanAndSolveSlider();
-    scanAndSolveRotation();
+    triggerScan(); // 初始扫描
 
     if (document.body) {
       new MutationObserver((mutations) => {
@@ -253,8 +259,8 @@
       }
     }, true);
 
-    let activePollTimer = null;
     const triggerHighFrequencyScan = () => {
+      if (!isEnabled || !isCurrentUrlAllowed()) return;
       if (activePollTimer) clearInterval(activePollTimer);
       let count = 0;
       activePollTimer = setInterval(() => {
@@ -290,7 +296,7 @@
 
   /** 扫描页面寻找验证码，找到后自动识别并填入 */
   async function scanAndSolve() {
-    if (!isEnabled || isProcessing) return;
+    if (!isEnabled || !isCurrentUrlAllowed() || isProcessing) return;
 
     const imgEl = findCaptchaImage();
     const inputEl = findCaptchaInput();
@@ -312,7 +318,7 @@
   function bindElementObservers(imgEl, inputEl) {
     if (!imgEl.dataset.hasSolverObserver) {
       imgEl.dataset.hasSolverObserver = 'true';
-      
+
       let srcChangeTimer = null;
       new MutationObserver(() => {
         if (srcChangeTimer) clearTimeout(srcChangeTimer);
@@ -324,11 +330,6 @@
         if (clickTimer) clearTimeout(clickTimer);
         clickTimer = setTimeout(() => solveTarget(imgEl, inputEl), CLICK_REFRESH_DEBOUNCE_MS);
       });
-    }
-
-    if (!inputEl.dataset.hasSolverObserver) {
-      inputEl.dataset.hasSolverObserver = 'true';
-      
     }
   }
 
@@ -342,7 +343,7 @@
 
     // 内置选择器匹配
     for (const sel of IMG_SELECTORS) {
-      const el = document.querySelector(sel);
+      const el = querySafe(sel);
       if (el && isVisible(el) && isCaptchaSize(el)) return el;
     }
 
@@ -351,16 +352,16 @@
       const src = (img.src || '').toLowerCase();
       const className = (img.className || '').toString().toLowerCase();
       const parentClass = (img.parentElement?.className || '').toString().toLowerCase();
-      
+
       const isMatch = src.includes('captcha') || src.includes('code') || src.includes('verify') ||
                       className.includes('captcha') || className.includes('code') || className.includes('verify') ||
                       parentClass.includes('code') || parentClass.includes('captcha');
-      
+
       if (!isMatch) continue; // 第一道屏障：极低成本过滤 99% 的无关图片
-      
+
       // 匹配后再执行昂贵的 DOM 布局计算 (isVisible 等)，避免页面卡顿
       if (!isCaptchaValid(img) || !isCaptchaSize(img) || !isVisible(img)) continue;
-      
+
       return img;
     }
     return null;
@@ -374,7 +375,7 @@
 
     // 内置选择器匹配
     for (const sel of INPUT_SELECTORS) {
-      const el = document.querySelector(sel);
+      const el = querySafe(sel);
       if (el && isVisible(el)) return el;
     }
 
@@ -382,10 +383,10 @@
     for (const input of document.querySelectorAll("input[type='text'], input:not([type])")) {
       const ph = (input.placeholder || '').toLowerCase();
       const name = (input.name || '').toLowerCase();
-      
+
       const isMatch = ph.includes('验证码') || ph.includes('code') || name.includes('code');
       if (!isMatch) continue; // 极低成本过滤
-      
+
       if (!isVisible(input)) continue; // 昂贵的布局计算放最后
       return input;
     }
@@ -404,8 +405,6 @@
       const base64 = await getImageBase64(imgEl);
       if (!base64) throw new Error('图片跨域限制，无法读取验证码');
 
-      
-
       // 发送至 Service Worker -> Offscreen 进行推理
       const data = await chrome.runtime.sendMessage({
         type: 'ocr',
@@ -414,9 +413,9 @@
       });
 
       if (data && data.success && data.text) {
-        // ========== 新增数学公式解析层 ==========
+        // ========== 数学公式解析层 ==========
         const finalValue = parseMathCaptcha(data.text);
-        
+
         console.log(
           `[CaptchaSolver] ✅ 识别成功: 原始结果 [%c${data.text}%c] -> 填入 [%c${finalValue}%c]`,
           'color:#2563eb; font-weight:bold;', '', 'color:#16a34a; font-weight:bold;', ''
@@ -439,36 +438,55 @@
 
   /**
    * 尝试解析并计算数学公式验证码
-   * 如果是数学题（如 3+4=?），返回计算结果；如果是普通字符串，原样返回
+   * 支持中文小写/大写数字、全角符号、汉字运算符（加减乘除）及标准 ASCII 算术题
    */
   function parseMathCaptcha(text) {
-    // 清理可能导致误判的空格
-    const cleanText = text.replace(/\s+/g, '');
-    
-    // 匹配：数字 (操作符) 数字 (可选的等号/问号/乱码)
-    const mathRegex = /^(\d+)([\+\-\*xX/÷])(\d+).*$/;
+    if (!text || typeof text !== 'string') return text;
+
+    const cnNumMap = {
+      '零': '0', '一': '1', '壹': '1',
+      '二': '2', '贰': '2', '两': '2',
+      '三': '3', '叁': '3',
+      '四': '4', '肆': '4',
+      '五': '5', '伍': '5',
+      '六': '6', '陆': '6',
+      '七': '7', '柒': '7',
+      '八': '8', '捌': '8',
+      '九': '9', '玖': '9'
+    };
+
+    // 归一化中文数字、全角字符、常见变体减号及汉字运算符
+    const cleanText = text
+      .replace(/\s+/g, '')
+      .replace(/[零一壹二贰两三叁四肆五伍六陆七柒八捌九玖]/g, m => cnNumMap[m] || m)
+      .replace(/[加＋﹢]/g, '+')
+      .replace(/[减－﹣–—−]/g, '-')
+      .replace(/[乘xX×✕✖*]/g, '*')
+      .replace(/[除÷/]/g, '/')
+      .replace(/[等于＝=]/g, '=')
+      .replace(/[？\?]/g, '');
+
+    // 匹配：数字 (操作符) 数字
+    const mathRegex = /^(\d+)([\+\-\*\/])(\d+)/;
     const match = cleanText.match(mathRegex);
-    
+
     if (match) {
       const num1 = parseInt(match[1], 10);
-      const operator = match[2].toLowerCase();
+      const operator = match[2];
       const num2 = parseInt(match[3], 10);
-      
+
       switch (operator) {
         case '+': return (num1 + num2).toString();
         case '-': return (num1 - num2).toString();
-        case '*':
-        case 'x': return (num1 * num2).toString();
-        case '/':
-        case '÷': return num2 !== 0 ? (Math.floor(num1 / num2)).toString() : text;
+        case '*': return (num1 * num2).toString();
+        case '/': return num2 !== 0 ? (Math.floor(num1 / num2)).toString() : text;
       }
     }
-    
-    // 如果不是数学题，原样返回
+
     return text;
   }
 
-  /** 提取图片的 Base64 编码，支持跨域回退 */
+  /** 提取图片的 Base64 编码，支持跨域回退与 Background 代理抓取 */
   function getImageBase64(imgEl) {
     return new Promise((resolve) => {
       const w = imgEl.naturalWidth || imgEl.width;
@@ -489,7 +507,18 @@
           ctx.drawImage(tmp, 0, 0, w, h);
           resolve(canvas.toDataURL('image/png'));
         };
-        tmp.onerror = () => resolve(null);
+        tmp.onerror = () => {
+          // 前端 CORS 受阻：请求 Background 借由 Extension 权限进行跨域 Fetch
+          let targetUrl = imgEl.src;
+          try { targetUrl = new URL(targetUrl, window.location.href).href; } catch(e) {}
+          chrome.runtime.sendMessage({ type: 'fetch-image', url: targetUrl }).then(res => {
+            if (res && res.success && res.base64) {
+              resolve(res.base64);
+            } else {
+              resolve(null);
+            }
+          }).catch(() => resolve(null));
+        };
         tmp.src = imgEl.src;
       }
     });
@@ -704,32 +733,48 @@
     return false;
   }
 
-  /** 判断元素是否为圆形（检查自身和父元素的 border-radius，或宽高比 ≈ 1:1） */
+  /** 判断元素是否为圆形（检查自身和父元素的 border-radius、clip-path，或具备旋转验证码圆形特征） */
   function isElementCircular(el) {
+    if (!el) return false;
     const targets = [el, el.parentElement].filter(Boolean);
     for (const t of targets) {
-      const br = window.getComputedStyle(t).borderRadius;
-      if (br && br.includes('50%')) return true;
-      // 处理 "75px" 这种绝对值：与元素短边一半对比
-      const match = br && br.match(/^(\d+(?:\.\d+)?)px$/);
+      const style = window.getComputedStyle(t);
+      const br = style.borderRadius;
+      if (br && (br.includes('50%') || br.includes('100%'))) return true;
+
+      const clip = style.clipPath || style.webkitClipPath;
+      if (clip && clip.includes('circle')) return true;
+
+      // 处理绝对像素值 (例如 "75px" 或 "9999px" 等大数值圆角)
+      const match = br && br.match(/^(\d+(?:\.\d+)?)px/);
       if (match) {
         const rect = t.getBoundingClientRect();
         const halfSize = Math.min(rect.width, rect.height) / 2;
-        if (Math.abs(parseFloat(match[1]) - halfSize) < 2) return true;
+        const radiusPx = parseFloat(match[1]);
+        if (halfSize > 0 && radiusPx >= halfSize - 2) return true;
       }
     }
-    // 宽高比接近 1:1，并且宽高介于 30 到 200 之间，大概率是验证码旋转内部图或拼图块
-    const rect = el.getBoundingClientRect();
-    if (rect.width >= 30 && rect.width <= 200 && rect.height >= 30 && rect.height <= 200) {
-      return Math.abs(rect.width / rect.height - 1) < 0.15;
+
+    // 检查是否有旋转/圆环相关的语义特征或类名
+    const className = (el.className || '').toString().toLowerCase();
+    const id = (el.id || '').toLowerCase();
+    const hasCircleHint = className.includes('circle') || className.includes('round') || className.includes('rotate') ||
+                          id.includes('circle') || id.includes('round') || id.includes('rotate');
+
+    if (hasCircleHint) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width >= 20 && rect.width <= 300 && rect.height >= 20 && rect.height <= 300) {
+        return Math.abs(rect.width / rect.height - 1) < 0.2;
+      }
     }
+
     return false;
   }
 
   // ==================== 滑动验证码 ====================
 
   async function scanAndSolveSlider() {
-    if (!isEnabled || isSliderProcessing) return;
+    if (!isEnabled || !isCurrentUrlAllowed() || !algoV2Enabled || isSliderProcessing) return;
 
     // 查找滑动验证码元素
     const sliderElements = findSliderElements();
@@ -886,7 +931,7 @@
 
   // ==================== 旋转验证码：记忆与自适应学习系统 ====================
 
-  let OFFSET_EXPLORE_SEQUENCE = [0, 3, -3, 6, -6, 9, -9, 12, -12, 15, -15, 18, -18, 20, -20];
+  const OFFSET_EXPLORE_SEQUENCE = [0, 3, -3, 6, -6, 9, -9, 12, -12, 15, -15, 18, -18, 21, -21];
 
   // 全局内存变量，解决 DOM 节点被销毁导致无法跨周期记录验证失败的问题
   let pendingRotationMemoryTask = null;
@@ -895,8 +940,8 @@
   // 轻量级 Base64 字符串归一化哈希生成器 (djb2 变体)
   function getStableImageHash(str) {
     if (!str) return 'empty';
-    // 剥离可能存在的 base64 协议头
-    const cleanStr = str.replace(/^data:image\/[a-z]+;base64,/, '').trim();
+    // 剥离可能存在的 base64 协议头（兼容所有 MIME 类型）
+    const cleanStr = str.replace(/^data:image\/[^;]+;base64,/i, '').trim();
     let hash = 5381;
     const len = cleanStr.length;
     const step = Math.max(1, Math.floor(len / 1000));
@@ -1035,11 +1080,7 @@
   // ==================== 旋转验证码 ====================
 
   async function scanAndSolveRotation() {
-    if (!isEnabled) return;
-    if (isRotationProcessing) {
-      
-      return;
-    }
+    if (!isEnabled || !isCurrentUrlAllowed() || !algoV3Enabled || isRotationProcessing) return;
 
     // 查找旋转验证码元素
     const rotationElements = findRotationElements();
@@ -1554,6 +1595,7 @@
     }
 
     if (!imgSrc) return null;
+    try { imgSrc = new URL(imgSrc, window.location.href).href; } catch(e) {}
 
     return new Promise((resolve) => {
       const img = new Image();
@@ -1633,11 +1675,16 @@
 
     const track = generateHumanTrack(distance);
 
-    const createPointerEvent = (type, x, y, buttons = 1) => {
+    let lastX = startX;
+    let lastY = startY;
+
+    const createPointerEvent = (type, x, y, buttons = 1, moveX = 0, moveY = 0) => {
       try {
         return new PointerEvent(type, {
           bubbles: true, cancelable: true, composed: true,
           clientX: x, clientY: y, screenX: x, screenY: y,
+          pageX: window.scrollX + x, pageY: window.scrollY + y,
+          movementX: moveX, movementY: moveY,
           button: type.endsWith('up') ? 0 : (buttons > 0 ? 0 : -1),
           buttons: buttons,
           pointerId: 1,
@@ -1648,10 +1695,12 @@
       } catch (e) { return null; }
     };
 
-    const createMouseEvent = (type, x, y, buttons = 1) => {
+    const createMouseEvent = (type, x, y, buttons = 1, moveX = 0, moveY = 0) => {
       return new MouseEvent(type, {
         bubbles: true, cancelable: true, composed: true,
         clientX: x, clientY: y, screenX: x, screenY: y,
+        pageX: window.scrollX + x, pageY: window.scrollY + y,
+        movementX: moveX, movementY: moveY,
         button: type.endsWith('up') ? 0 : (buttons > 0 ? 0 : -1),
         buttons: buttons
       });
@@ -1661,7 +1710,9 @@
       try {
         const touch = new Touch({
           identifier: 1, target: target,
-          clientX: x, clientY: y, pageX: x, pageY: y, screenX: x, screenY: y,
+          clientX: x, clientY: y,
+          pageX: window.scrollX + x, pageY: window.scrollY + y,
+          screenX: x, screenY: y,
           radiusX: 11.5, radiusY: 11.5, rotationAngle: 0, force: 1
         });
         return new TouchEvent(type, {
@@ -1673,24 +1724,24 @@
       } catch (e) { return null; }
     };
 
-    const dispatchAll = (typePrefix, target, x, y, buttons) => {
-      const pe = createPointerEvent(`pointer${typePrefix}`, x, y, buttons);
+    const dispatchAll = (typePrefix, target, x, y, buttons, moveX = 0, moveY = 0) => {
+      const pe = createPointerEvent(`pointer${typePrefix}`, x, y, buttons, moveX, moveY);
       if (pe) target.dispatchEvent(pe);
-      
+
       const touchType = typePrefix === 'down' ? 'touchstart' : typePrefix === 'up' ? 'touchend' : 'touchmove';
       const te = createTouchEvent(touchType, btnEl, x, y);
       if (te) target.dispatchEvent(te);
-      
-      const me = createMouseEvent(`mouse${typePrefix}`, x, y, buttons);
+
+      const me = createMouseEvent(`mouse${typePrefix}`, x, y, buttons, moveX, moveY);
       target.dispatchEvent(me);
     };
 
     // --- Down ---
-    dispatchAll('down', btnEl, startX, startY, 1);
+    dispatchAll('down', btnEl, startX, startY, 1, 0, 0);
 
     let prevTime = 0;
     let maxOffset = 0;
-    
+
     // --- Move ---
     for (const point of track) {
       const delay = point.time - prevTime;
@@ -1699,11 +1750,15 @@
 
       const moveX = startX + point.x;
       const moveY = startY + point.y;
+      const moveDeltaX = moveX - lastX;
+      const moveDeltaY = moveY - lastY;
+      lastX = moveX;
+      lastY = moveY;
 
       // 分发给按钮和 Document，确保绑定在全局的事件能收到
-      dispatchAll('move', btnEl, moveX, moveY, 1);
-      dispatchAll('move', document, moveX, moveY, 1);
-      
+      dispatchAll('move', btnEl, moveX, moveY, 1, moveDeltaX, moveDeltaY);
+      dispatchAll('move', document, moveX, moveY, 1, moveDeltaX, moveDeltaY);
+
       const currentLeft = Math.round(btnEl.getBoundingClientRect().left + btnRect.width / 2);
       maxOffset = Math.max(maxOffset, Math.abs(currentLeft - startX));
     }
@@ -1711,9 +1766,9 @@
     // --- Up ---
     const endX = startX + distance;
     await sleep(150); // 解决“即将到达目标角度的抽动”导致提前触发验证的问题
-    dispatchAll('up', btnEl, endX, startY, 0);
-    dispatchAll('up', document, endX, startY, 0);
-    
+    dispatchAll('up', btnEl, endX, startY, 0, 0, 0);
+    dispatchAll('up', document, endX, startY, 0, 0, 0);
+
     return maxOffset >= 5;
   }
 
@@ -1731,12 +1786,26 @@
     }
   }
 
-  // 确保在所有变量声明后执行
-  if (chrome.storage?.sync) {
+  /** 运行时实时判断当前页面 URL 是否在白名单中 */
+  function isCurrentUrlAllowed() {
+    if (!cachedWhitelist || cachedWhitelist.length === 0) return false;
+    const currentDomain = getCleanUrl(window.location.href);
+    return cachedWhitelist.includes(currentDomain);
+  }
+
+  // ==================== 白名单与生命周期管理 ====================
+
+  function checkWhitelistAndRun() {
+    if (!chrome.storage?.sync) {
+      console.warn('[CaptchaSolver] 无法访问 chrome.storage API');
+      return;
+    }
+
     chrome.storage.sync.get(['domainWhitelist'], (res) => {
       const whitelist = res.domainWhitelist || [];
+      cachedWhitelist = whitelist;
       const currentDomain = getCleanUrl(window.location.href);
-      
+
       // 只有当前页面全路径在白名单中时，才初始化扩展
       if (whitelist.length > 0 && whitelist.includes(currentDomain)) {
         init();
@@ -1744,8 +1813,45 @@
         console.log(`[CaptchaSolver] 当前页面 ${currentDomain} 不在白名单中，自动识别已禁用。`);
       }
     });
-  } else {
-    // 兼容可能没有 storage 的环境，保守处理不启动，或者默认启动（这里选择不启动，因为用户要求列表为空不运行）
-    console.warn('[CaptchaSolver] 无法访问 chrome.storage API');
   }
+
+  // 监听白名单和启用状态变更，支持动态实时自启与缓存同步
+  if (chrome.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'sync') return;
+      if (changes.domainWhitelist) {
+        const newWhitelist = changes.domainWhitelist.newValue || [];
+        cachedWhitelist = newWhitelist;
+        const currentDomain = getCleanUrl(window.location.href);
+        const isAllowed = newWhitelist.length > 0 && newWhitelist.includes(currentDomain);
+        if (isAllowed && !isInitialized) {
+          init();
+        } else if (isInitialized) {
+          isEnabled = isAllowed;
+        }
+      }
+    });
+  }
+
+  // 全局监听单页应用 (SPA) 路由切换，实现双向无缝自启与休眠
+  function handleGlobalRouteTransition() {
+    const isAllowed = isCurrentUrlAllowed();
+    if (isAllowed) {
+      if (!isInitialized) {
+        init();
+      } else {
+        triggerScan();
+      }
+    } else {
+      if (activePollTimer) {
+        clearInterval(activePollTimer);
+        activePollTimer = null;
+      }
+    }
+  }
+
+  window.addEventListener('hashchange', handleGlobalRouteTransition);
+  window.addEventListener('popstate', handleGlobalRouteTransition);
+
+  checkWhitelistAndRun();
 })();

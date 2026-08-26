@@ -48,6 +48,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (chrome.storage?.sync) {
       chrome.storage.sync.set(config, () => {
+        if (chrome.runtime.lastError) {
+          showToast(`❌ 保存失败: ${chrome.runtime.lastError.message}`);
+          return;
+        }
         showToast('✅ 保存成功！已同步应用');
       });
     } else {
@@ -68,6 +72,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const emptyConfig = ALL_KEYS.reduce((acc, key) => ({ ...acc, [key]: '' }), {});
     if (chrome.storage?.sync) {
       chrome.storage.sync.set(emptyConfig, () => {
+        if (chrome.runtime.lastError) {
+          showToast(`❌ 重置失败: ${chrome.runtime.lastError.message}`);
+          return;
+        }
         showToast('🔄 已恢复默认配置');
       });
     } else {
@@ -131,25 +139,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
     whitelist.forEach((domain, index) => {
       const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td style="font-family: monospace; font-size: 14px; color: #e2e8f0;">${domain}</td>
-        <td>
-          <button class="btn delete-btn" data-index="${index}" style="background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); padding: 4px 8px; font-size: 12px; cursor: pointer; border-radius: 4px;">删除</button>
-        </td>
-      `;
-      whitelistTableBody.appendChild(tr);
-    });
 
-    // 绑定删除事件
-    document.querySelectorAll('.delete-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const idx = parseInt(e.target.dataset.index, 10);
-        whitelist.splice(idx, 1);
+      const tdDomain = document.createElement('td');
+      tdDomain.style.fontFamily = 'monospace';
+      tdDomain.style.fontSize = '14px';
+      tdDomain.style.color = '#e2e8f0';
+      tdDomain.textContent = domain;
+
+      const tdAction = document.createElement('td');
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'btn delete-btn';
+      deleteBtn.style.cssText = 'background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); padding: 4px 8px; font-size: 12px; cursor: pointer; border-radius: 4px;';
+      deleteBtn.textContent = '删除';
+      deleteBtn.addEventListener('click', () => {
+        whitelist.splice(index, 1);
         chrome.storage.sync.set({ domainWhitelist: whitelist }, () => {
+          if (chrome.runtime.lastError) {
+            showToast(`❌ 移除失败: ${chrome.runtime.lastError.message}`);
+            return;
+          }
           showToast('✅ 域名已移除');
           renderWhitelistTable(whitelist);
         });
       });
+
+      tdAction.appendChild(deleteBtn);
+      tr.appendChild(tdDomain);
+      tr.appendChild(tdAction);
+      whitelistTableBody.appendChild(tr);
     });
   }
 
@@ -179,6 +196,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         whitelist.push(domain);
         chrome.storage.sync.set({ domainWhitelist: whitelist }, () => {
+          if (chrome.runtime.lastError) {
+            showToast(`❌ 保存失败: ${chrome.runtime.lastError.message}`);
+            return;
+          }
           showToast('✅ 域名添加成功');
           newDomainInput.value = '';
           renderWhitelistTable(whitelist);
@@ -289,8 +310,17 @@ document.addEventListener('DOMContentLoaded', () => {
         saveSingleMemory(key, parseInt(offsetInput.value, 10));
       };
 
+      const deleteActionBtn = document.createElement('button');
+      deleteActionBtn.className = 'action-btn';
+      deleteActionBtn.style.cssText = 'background: rgba(239, 68, 68, 0.15); color: #ef4444; border-color: rgba(239, 68, 68, 0.3); margin-left: 4px;';
+      deleteActionBtn.textContent = '🗑️ 删除';
+      deleteActionBtn.onclick = () => {
+        deleteSingleMemory(key);
+      };
+
       tdAction.appendChild(calibrateBtn);
       tdAction.appendChild(saveActionBtn);
+      tdAction.appendChild(deleteActionBtn);
       tr.appendChild(tdAction);
 
       tbody.appendChild(tr);
@@ -512,8 +542,27 @@ document.addEventListener('DOMContentLoaded', () => {
     // 写回 Storage
     if (chrome.storage?.local) {
       chrome.storage.local.set({ rotationMemory: memoryData }, () => {
+        if (chrome.runtime.lastError) {
+          showToast(`❌ 保存失败: ${chrome.runtime.lastError.message}`);
+          return;
+        }
         renderMemoryTable(searchInput.value);
         showToast(`已成功将 ${key} 的偏移坐标保存为 ${offsetValue}°`);
+      });
+    }
+  }
+
+  function deleteSingleMemory(key) {
+    if (!confirm(`确定要删除 ${key} 的记忆记录吗？`)) return;
+    delete memoryData[key];
+    if (chrome.storage?.local) {
+      chrome.storage.local.set({ rotationMemory: memoryData }, () => {
+        if (chrome.runtime.lastError) {
+          showToast(`❌ 删除失败: ${chrome.runtime.lastError.message}`);
+          return;
+        }
+        renderMemoryTable(searchInput.value);
+        showToast(`✅ 已删除 ${key} 记忆记录`);
       });
     }
   }

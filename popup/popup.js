@@ -145,6 +145,13 @@ document.addEventListener('DOMContentLoaded', () => {
           if (!whitelist.includes(currentDomain)) {
             whitelist.push(currentDomain);
             chrome.storage.sync.set({ domainWhitelist: whitelist }, () => {
+              if (chrome.runtime.lastError) {
+                if (domainBadge) {
+                  domainBadge.innerText = '添加失败';
+                  domainBadge.className = 'domain-badge badge-warning';
+                }
+                return;
+              }
               if (domainBadge) {
                 domainBadge.innerText = '已在白名单';
                 domainBadge.className = 'domain-badge badge-success';
